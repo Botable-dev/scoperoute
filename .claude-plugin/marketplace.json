@@ -1,0 +1,14 @@
+{
+  "name": "konn4-tools",
+  "owner": { "name": "konon4" },
+  "description": "Small Claude Code tools by konon4.",
+  "plugins": [
+    {
+      "name": "scoperoute",
+      "source": ".",
+      "description": "Point free Fable 5 at the projects it will actually cooperate on: multi-model Fable-refusal triage for your repos.",
+      "category": "workflow",
+      "homepage": "https://github.com/konon4/scoperoute"
+    }
+  ]
+}

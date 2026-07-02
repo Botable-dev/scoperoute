@@ -1,0 +1,13 @@
+# scoperoute never commits reports or anything derived from transcripts —
+# they can contain project names, categories, and (in raw form) secrets.
+scoperoute_report.*
+*.private.*
+*.csv
+*.jsonl
+
+# python / os
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

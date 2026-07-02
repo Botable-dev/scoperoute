@@ -1,0 +1,8 @@
+{
+  "name": "scoperoute",
+  "description": "Triage local git projects: which to build with Claude Fable 5 vs keep on Opus 4.8. Runs one benign probe through Fable + Opus/Sonnet controls to detect and disambiguate Fable safety-classifier refusals.",
+  "version": "0.1.0",
+  "author": { "name": "konon4" },
+  "homepage": "https://github.com/konon4/scoperoute",
+  "license": "MIT"
+}

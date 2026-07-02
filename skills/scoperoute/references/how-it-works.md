@@ -50,6 +50,19 @@ no value on `fable_friendly` projects.
 - A refusal's `explanation` field carries a live, tokened URL — scoperoute never reads or emits it, only
   the category label.
 
+## Limitations (know these)
+
+- **Cold triage under-detects.** One benign probe at rest is the mildest possible request; Fable will
+  serve it on most projects even where it later balks *during real coding* (new files enter context, tool
+  outputs, a growing diff). That runtime trigger is what Phase 2 (`fable_watch.py`) is for — a
+  `fable_friendly` cold verdict is a starting hypothesis, not a guarantee.
+- **The classifier is not perfectly deterministic near its boundary.** A borderline project can trip on
+  one probe and not the next (in practice we've seen `bare` trip while `full` doesn't). Treat a lone trip
+  on a borderline project as a signal to look closer, not a hard label; re-run to confirm.
+- **CLI mode loses the category on a masked fallback.** When Claude Code answers a refused Fable turn by
+  silently falling back to Opus, there is no refusal turn to read a category from — scoperoute still marks
+  the project tripped (served model diverged), but `category` is blank. Use `--api` for the raw category.
+
 ## Troubleshooting an all-error run
 
 1. **Fable data retention** — Fable requires ≥30-day retention. Under zero / under-30-day retention every

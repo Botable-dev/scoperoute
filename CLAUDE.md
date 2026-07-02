@@ -14,9 +14,10 @@ context buckets, and the invariants; read it before extending.
 
 - **Phase 1 (shipped): multi-model triage engine + `/scoperoute` skill.** `skills/scoperoute/scripts/
   scoperoute.py` + `transcript.py`, packaged as a plugin (`.claude-plugin/`, `skills/scoperoute/`).
-- **Phase 2 (planned, fast-follow): `fable_watch.py`** — live per-turn Fable→Opus fallback monitor built
-  on `transcript.py`. Not built yet; `references/claude-session-sync-README.md` is the vendored
-  domain-model reference for the on-disk session layout it will tail.
+- **Phase 2 (built): `fable_watch.py`** — live per-turn Fable→Opus fallback monitor on `transcript.py`
+  (tails main + subagent sidecars; metadata-only event log; fallback-rate/streak; §4.6 reclass hint).
+  Verified via unit fixture + real-session replay. `references/claude-session-sync-README.md` is the
+  vendored domain-model reference for the on-disk session layout.
 
 ## Layout
 
@@ -24,7 +25,8 @@ context buckets, and the invariants; read it before extending.
 .claude-plugin/{plugin.json, marketplace.json}   # plugin + self-hosted marketplace metadata
 skills/scoperoute/
   SKILL.md                                        # user-invocable: true → /scoperoute
-  scripts/scoperoute.py                           # the engine (evolved from the old fable_triage.py)
+  scripts/scoperoute.py                           # Phase 1 engine (evolved from the old fable_triage.py)
+  scripts/fable_watch.py                          # Phase 2 live fallback monitor
   scripts/transcript.py                           # shared metadata-only transcript reader
   references/{interpreting-results, how-it-works, claude-session-sync-README}.md
 PRD_scoperoute.md · README.md · LICENSE · .gitignore

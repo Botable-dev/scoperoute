@@ -830,10 +830,15 @@ def main():
                     help="Print a cost/size estimate and exit (no probes).")
     ap.add_argument("--repeat", type=int, default=1,
                     help="Probe repeats per unit for a majority vote (also drives --estimate).")
-    ap.add_argument("--probe", choices=["summary", "arch"], default="summary",
-                    help="summary = cheap benign-summarize probe (default). "
-                         "arch = no-trim distillation (Sonnet recon -> Opus summary -> Fable "
-                         "'improve architecture') with per-component verdicts. CLI backend only.")
+    ap.add_argument("--probe", choices=["summary", "arch"], default=None,
+                    help="arch (default) = no-trim distillation (Sonnet recon -> Opus summary -> "
+                         "Fable 'improve architecture') with per-component verdicts, CLI only. "
+                         "summary = cheap benign-summarize probe (bare/full; the default under --api).")
+    ap.add_argument("--tier", choices=["pro", "max5", "max20", "team"], default=None,
+                    help="Claude plan for the $/% math (else CodexBar detects it, else asked).")
+    ap.add_argument("--plan-usd", type=float, default=None, help="Override the plan's monthly USD.")
+    ap.add_argument("--no-codexbar", action="store_true",
+                    help="Don't call CodexBar for real tier/usage/spend.")
     ap.add_argument("--api", action="store_true", help="Use the Anthropic SDK (clean signal).")
     ap.add_argument("--batch", action="store_true", help="API only: 50%%-off Batch API run.")
     ap.add_argument("--adjudicate", action="store_true",
@@ -851,6 +856,9 @@ def main():
                     help="Extra flag passed through to `claude -p` (repeatable).")
     args = ap.parse_args()
 
+    if args.probe is None:                   # default: arch, but summary under --api
+        args.probe = "summary" if args.api else "arch"
+
     if args.batch and not args.api:
         sys.exit("--batch requires --api.")
     if args.probe == "arch" and args.api:
@@ -864,7 +872,11 @@ def main():
         sys.exit("No projects found.")
 
     if args.estimate:                       # calculator-only mode — no probes
-        E.print_report(E.summarize(projects, args.repeat), args.repeat)
+        ests = E.summarize(projects, args.repeat)
+        E.print_report(ests, args.repeat)
+        import subscription as SUB
+        snap = None if args.no_codexbar else SUB.snapshot()
+        print(SUB.format_block(ests, args.tier, args.plan_usd, snap))
         return
 
     jsonl_path = args.out.with_suffix(".jsonl")

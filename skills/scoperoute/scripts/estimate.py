@@ -130,6 +130,17 @@ def _cost(model: str, in_tok: int, out_tok: int, calls: int = 1) -> float:
 
 
 @dataclass
+class StageCost:
+    stage: str          # recon | summary | probe | controls
+    model: str
+    tokens_in: int
+    tokens_out: int
+    calls: int
+    usd: float
+    when: str           # "always" | "if_tripped"  (controls run only where Fable trips)
+
+
+@dataclass
 class Estimate:
     project: str
     components: int
@@ -139,6 +150,7 @@ class Estimate:
     calls_max: int          # every component trips -> full controls
     usd_min: float
     usd_max: float
+    stages: list            # list[StageCost] — the tokens/$/part breakdown
 
 
 def estimate_project(project: Path, repeat: int = 1) -> Estimate:
@@ -147,36 +159,39 @@ def estimate_project(project: Path, repeat: int = 1) -> Estimate:
     proj_bytes, proj_files = code_bytes(project)
     proj_tok = toks(proj_bytes)
 
+    stages: list[StageCost] = []
+
     # Stage 1 — recon (Sonnet 5, low): reads source (no char-truncation), but is
     # bounded — it samples a representative slice then summarizes, so a giant repo
     # doesn't mean a giant bill.
     recon_in = min(int(proj_tok * RECON_OVERHEAD), RECON_INPUT_CAP)
     recon_out = RECON_OUT_BASE + RECON_OUT_PER_COMPONENT * n
-    usd = _cost("claude-sonnet-5", recon_in, recon_out)
-    calls = 1
+    stages.append(StageCost("recon", "claude-sonnet-5", recon_in, recon_out, 1,
+                            _cost("claude-sonnet-5", recon_in, recon_out), "always"))
 
     # Stage 2 — summary (Opus): recon notes -> per-component arch.md (one call).
-    summary_out = SUMMARY_OUT_PER_COMPONENT * n
-    usd += _cost("claude-opus-4-8", recon_out + 500, summary_out)
-    calls += 1
+    sum_in, sum_out = recon_out + 500, SUMMARY_OUT_PER_COMPONENT * n
+    stages.append(StageCost("summary", "claude-opus-4-8", sum_in, sum_out, 1,
+                            _cost("claude-opus-4-8", sum_in, sum_out), "always"))
 
     # Stage 3 — probe (Fable): each component, repeated N times.
     probe_calls = n * repeat
-    usd += _cost("claude-fable-5", ARCH_TOKENS, PROBE_OUT, probe_calls)
-    calls += probe_calls
+    stages.append(StageCost("probe", "claude-fable-5",
+                            ARCH_TOKENS * probe_calls, PROBE_OUT * probe_calls, probe_calls,
+                            _cost("claude-fable-5", ARCH_TOKENS, PROBE_OUT, probe_calls), "always"))
 
-    usd_min = usd
-    calls_min = calls
+    # Stage 4 — controls (Opus + Sonnet), only on components that trip (max = all n).
+    for m in ("claude-opus-4-8", "claude-sonnet-5"):
+        stages.append(StageCost("controls", m, ARCH_TOKENS * n, PROBE_OUT * n, n,
+                                _cost(m, ARCH_TOKENS, PROBE_OUT, n), "if_tripped"))
 
-    # Stage 4 — controls (Opus + Sonnet), only on components that trip.
-    # min = none trip; max = all trip.
-    ctrl_each = _cost("claude-opus-4-8", ARCH_TOKENS, PROBE_OUT) + \
-                _cost("claude-sonnet-5", ARCH_TOKENS, PROBE_OUT)
-    usd_max = usd + ctrl_each * n
-    calls_max = calls + 2 * n
+    usd_min = round(sum(s.usd for s in stages if s.when == "always"), 3)
+    usd_max = round(sum(s.usd for s in stages), 3)
+    calls_min = sum(s.calls for s in stages if s.when == "always")
+    calls_max = sum(s.calls for s in stages)
 
     return Estimate(str(project), n, proj_files, proj_tok,
-                    calls_min, calls_max, round(usd_min, 3), round(usd_max, 3))
+                    calls_min, calls_max, usd_min, usd_max, stages)
 
 
 def summarize(projects: list[Path], repeat: int = 1) -> list[Estimate]:
@@ -207,6 +222,36 @@ def print_report(ests: list[Estimate], repeat: int) -> None:
     print(f"{'TOTAL':<{name_w}}  {sum(e.components for e in ests):>3}  "
           f"{sum(e.code_files for e in ests):>6}  {tok:>9,}  "
           f"{f'{cmin}-{cmax}':>9}  {f'${tmin:.2f}-${tmax:.2f}':>16}")
+
+    # tokens / $ per pipeline part (the "tokens/$/part" the launch prompt asks for)
+    from collections import defaultdict
+    stage_agg = defaultdict(lambda: {"models": set(), "calls": 0, "tin": 0, "tout": 0,
+                                     "usd": 0.0, "when": "always"})
+    model_agg = defaultdict(lambda: {"tin": 0, "tout": 0, "usd_min": 0.0, "usd_max": 0.0})
+    for e in ests:
+        for s in e.stages:
+            a = stage_agg[s.stage]
+            a["models"].add(s.model.replace("claude-", ""))
+            a["calls"] += s.calls; a["tin"] += s.tokens_in; a["tout"] += s.tokens_out; a["usd"] += s.usd
+            if s.when == "if_tripped":
+                a["when"] = "if_tripped"
+            m = model_agg[s.model]
+            m["tin"] += s.tokens_in; m["tout"] += s.tokens_out; m["usd_max"] += s.usd
+            if s.when == "always":
+                m["usd_min"] += s.usd
+    print("\nBy stage (tokens / $ per part):")
+    for stage in ("recon", "summary", "probe", "controls"):
+        if stage in stage_agg:
+            a = stage_agg[stage]
+            tag = "" if a["when"] == "always" else "   ← only components that trip"
+            print(f"  {stage:<9} {'+'.join(sorted(a['models'])):<20} calls={a['calls']:<5} "
+                  f"in={a['tin']:>10,} out={a['tout']:>8,}  ${a['usd']:>7.2f}{tag}")
+    print("By model:")
+    for model in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
+        if model in model_agg:
+            m = model_agg[model]
+            print(f"  {model:<18} in={m['tin']:>10,} out={m['tout']:>8,}  "
+                  f"${m['usd_min']:.2f}–${m['usd_max']:.2f}")
     print(f"\n{len(ests)} project(s) · repeat={repeat} · "
           f"~{tmin:.2f}–{tmax:.2f} USD notional  (min = nothing trips → no controls; "
           f"max = every component trips → full controls)")
@@ -232,9 +277,20 @@ def main():
     g.add_argument("--root", type=Path, help="Estimate every git repo under here.")
     g.add_argument("--projects", type=Path, nargs="+", help="Estimate these paths.")
     ap.add_argument("--repeat", type=int, default=1, help="Probe repeats per component (majority vote).")
+    ap.add_argument("--tier", choices=["pro", "max5", "max20", "team"], default=None,
+                    help="Claude plan for the $/% math (else CodexBar detects it).")
+    ap.add_argument("--plan-usd", type=float, default=None, help="Override the plan's monthly USD.")
+    ap.add_argument("--no-codexbar", action="store_true", help="Don't call CodexBar for real tier/usage.")
     args = ap.parse_args()
     projects = _find_projects(args.root) if args.root else list(args.projects)
-    print_report(summarize(projects, args.repeat), args.repeat)
+    ests = summarize(projects, args.repeat)
+    print_report(ests, args.repeat)
+    try:
+        import subscription as SUB
+        snap = None if args.no_codexbar else SUB.snapshot()
+        print(SUB.format_block(ests, args.tier, args.plan_usd, snap))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

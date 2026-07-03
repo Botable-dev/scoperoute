@@ -1,8 +1,8 @@
 {
   "name": "scoperoute",
-  "description": "Triage local git projects: which to build with Claude Fable 5 vs keep on Opus 4.8. Runs one benign probe through Fable + Opus/Sonnet controls to detect and disambiguate Fable safety-classifier refusals.",
-  "version": "0.1.0",
-  "author": { "name": "konon4" },
-  "homepage": "https://github.com/konon4/scoperoute",
+  "description": "Which of your projects can you actually build with Claude Fable 5? Distills each repo (Sonnet recon → Opus summary), probes Fable per component, and estimates the run's tokens/$ per part and as a % of your Claude plan.",
+  "version": "0.2.0",
+  "author": { "name": "HubLab.ai", "email": "hello@hublab.ai" },
+  "homepage": "https://github.com/botable/scoperoute",
   "license": "MIT"
 }

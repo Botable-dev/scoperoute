@@ -52,15 +52,15 @@ no value on `fable_friendly` projects.
 
 ## Two probe modes
 
-- **`--probe summary` (default, cheap).** One benign "summarize this project" probe on a `bare`/`full`
-  context. Fast and free-ish, good for a first pass — but it samples the code within a char budget
-  (`--max-context-chars`), which is a compromise, and the mild request under-detects (see Limitations).
-- **`--probe arch` (accurate, no trimming).** The distillation pipeline: Sonnet 5 (low effort) reads the
-  project's files *itself* (agentic — no truncation, any repo size) and inventories its components →
-  Opus writes a clean architecture summary per component → Fable is asked to *improve the architecture*
-  of each component (a real engineering task, not a one-liner) and we watch for a refusal. Per-component,
-  so you see `frontend=friendly; backend=sensitive` and know not to build the backend on Fable. CLI
-  backend only.
+- **`--probe arch` (default, accurate, no trimming).** The distillation pipeline: Sonnet 5 (low effort)
+  reads the project's files *itself* (agentic — no truncation, any repo size) and inventories its
+  components → Opus writes a clean architecture summary per component → Fable is asked to *improve the
+  architecture* of each component (a real engineering task, not a one-liner) and we watch for a refusal.
+  Per-component, so you see `frontend=friendly; backend=sensitive` and know not to build the backend on
+  Fable. CLI backend only (it resolves to `summary` under `--api`).
+- **`--probe summary` (cheap fallback).** One benign "summarize this project" probe on a `bare`/`full`
+  context. Fast and free-ish for a first pass — but it samples the code within a char budget
+  (`--max-context-chars`), a compromise, and the mild request under-detects (see Limitations).
 
 ## No trimming (it's an anti-pattern)
 

@@ -1,14 +1,14 @@
 {
-  "name": "konn4-tools",
-  "owner": { "name": "konon4" },
-  "description": "Small Claude Code tools by konon4.",
+  "name": "hublab",
+  "owner": { "name": "HubLab.ai", "email": "hello@hublab.ai" },
+  "description": "Claude Code tools by HubLab.ai — a boutique AI & data development agency.",
   "plugins": [
     {
       "name": "scoperoute",
       "source": ".",
-      "description": "Point free Fable 5 at the projects it will actually cooperate on: multi-model Fable-refusal triage for your repos.",
+      "description": "Point free Fable 5 at the projects it will actually cooperate on — with a per-part cost estimate and % of your Claude plan.",
       "category": "workflow",
-      "homepage": "https://github.com/konon4/scoperoute"
+      "homepage": "https://github.com/botable/scoperoute"
     }
   ]
 }

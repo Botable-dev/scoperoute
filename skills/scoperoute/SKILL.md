@@ -1,103 +1,84 @@
 ---
 name: scoperoute
 description: >
-  Triage local git projects to decide which to build with Claude Fable 5 versus keep on Opus 4.8.
-  Sends one benign "summarize this project" probe through Fable plus Opus 4.8 and Sonnet 5 controls to
-  detect and explain Fable safety-classifier refusals: Fable-specific over-trigger (benign — use Opus)
-  vs genuinely sensitive (Opus, with care) vs config wording that trips the classifier (fixable).
-  Use when the user asks which projects to point Fable 5 at, says Fable keeps refusing or falling back
-  to Opus, wants to scope free-window Fable usage across many repos, or asks "what should I build with
-  Fable". Read-only and benign; it detects and routes, and never bypasses the classifier.
-version: 0.1.0
+  Decide which local git projects to build with Claude Fable 5 vs keep on Opus 4.8, and what it costs.
+  Distills each repo (Sonnet 5 recon → Opus 4.8 summary), probes Fable 5 per component with an "improve
+  the architecture" task, and reports per-component verdicts. Also estimates the run's tokens/$ per part
+  and — via CodexBar — as a % of the user's Claude plan (Pro/Max/Team), and says what to run first.
+  Use when the user asks which projects to point Fable at, says Fable keeps refusing / falling back to
+  Opus, asks "what should I build with free Fable", or wants a cost/subscription estimate for a triage.
+  Read-only and benign; detects and routes, never bypasses the classifier. By HubLab.ai.
+version: 0.2.0
 license: MIT
 user-invocable: true
 allowed-tools: Bash, Read
 ---
 
-# scoperoute — which projects to build with Claude Fable 5
+# scoperoute — which projects to build with Claude Fable 5, and what it costs
 
-Claude Fable 5's safety classifier reads the **context** of a request (`CLAUDE.md`, the file tree, git
-status, source) and can refuse benign work on some projects, silently falling back to Opus. scoperoute
-sends **one benign, non-security probe per project** — "in one sentence, summarize what this project is"
-— and records whether Fable refuses, then cross-checks with **Opus 4.8** and **Sonnet 5** controls to
-explain *why*. It only detects and routes; for a genuinely sensitive project the right answer is Opus,
-never coaxing Fable.
+Fable 5's safety classifier reads the **context** of a request and can refuse benign work on some
+projects, silently falling back to Opus. scoperoute distills each project and probes Fable per component
+to tell you where it cooperates — and prices the run before you spend anything. It only detects and
+routes; for a genuinely sensitive project the answer is Opus, never coaxing Fable.
 
-## When to run it
+`SR="${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py"`
 
-- "Which of my projects should I point (free) Fable 5 at?"
-- "Fable keeps refusing / falling back to Opus on some repos — which ones, and why?"
-- "I have N repos and want to know where Fable will actually cooperate."
+## The flow (follow this order)
 
-## How it works (one line each)
+1. **Estimate first — always.** The default `arch` mode reads whole codebases, so show the cost before
+   running:
+   ```bash
+   python "$SR" --root <path> --repeat 3 --estimate
+   ```
+   This prints tokens/$ **per part** (Sonnet recon → Opus summary → Fable probe → controls) and, when
+   CodexBar is available, the user's real tier + current window usage + spend, the run as a **% of their
+   plan**, and a **"run these first"** ranking.
 
-- Two probes per project: **bare** (code tree + source sample) and **full** (bare + `CLAUDE.md` +
-  `.claude/**/*.md`). Comparing them separates a *config* trigger from a *code* trigger.
-- **Controls run only on the variant that tripped.** If Opus + Sonnet answer the same benign ask, Fable
-  over-triggered (benign); if every model refuses, it's genuinely sensitive.
-- It never sends a `fallbacks` param — the point is to see the raw refusal, not a rescued Opus answer.
+2. **Get the tier if it wasn't detected.** If the Subscription block shows no detected plan (CodexBar
+   absent or not logged in), **ask the user** with AskUserQuestion: *Pro (~$20) / Max 5× (~$100) /
+   Max 20× (~$200) / Team (~$30/seat)* — then re-run the estimate with `--tier {pro,max5,max20,team}`
+   (or `--plan-usd N`) so the % is real.
 
-Details: `references/how-it-works.md`. Verdict table: `references/interpreting-results.md`.
+3. **Present the plan.** Show the per-part cost, the % of their subscription, and what to run first
+   (cheapest → dearest; flag the 1–2 cost-dominant projects). Let the user choose scope.
 
-## Prerequisites
+4. **Run the triage** (on their go):
+   ```bash
+   python "$SR" --root <path> --repeat 3 --jobs 4          # arch is the default
+   python "$SR" --projects <a> <b>                          # a quick subset
+   ```
+   Resumable — it appends one line per finished project and skips completed ones (`--refresh` to redo,
+   `--only-errors` to retry).
 
-- **Default (CLI mode):** just Claude Code — probes go through `claude -p`, which uses your
-  subscription (free Fable during the window). No API key.
-- **`--api` mode:** `pip install anthropic` and Anthropic API Fable access. Cleanest raw-refusal signal;
-  enables `--batch` (50 % off). If `ANTHROPIC_API_KEY` is unset, `anthropic.Anthropic()` also picks up an
-  `ant auth login` profile — don't hardcode a key.
-- **Fable needs ≥30-day data retention.** Under zero / under-30-day retention every Fable request 400s —
-  that, not the API key, is the usual cause of an all-error run.
+5. **Read results.** Present each project's **verdict** and **recommendation** (never the raw category),
+   including the per-component breakdown. Point to `references/interpreting-results.md`.
 
-## Run it
+## Reading the verdicts
 
-```bash
-SR="${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py"
-
-# ALWAYS estimate first — shows cost/tokens per project and for the whole root, no probes:
-python "$SR" --root ~/dev --probe arch --repeat 3 --estimate
-
-# fast first pass (cheap benign-summarize probe, parallel):
-python "$SR" --root ~/dev --jobs 4
-
-# accurate, no-trim, per-component (recon->summary->improve-architecture), majority vote:
-python "$SR" --root ~/dev --probe arch --repeat 3
-
-# clean raw-refusal signal via the API (summary mode), 50%-off bulk:
-python "$SR" --root ~/dev --api --batch --adjudicate
-```
-
-- `--probe arch` distills instead of truncating (no `--max-context-chars` limit) and gives per-component
-  verdicts; `--repeat N` turns a coin-flip into a trip fraction. Both are worth it for real decisions.
-- `--estimate` is important before any `--root` sweep — the arch pipeline reads whole codebases.
-
-Resumable: it appends one line per finished project to `scoperoute_report.jsonl` and skips completed
-projects on re-run (`--refresh` to redo, `--only-errors` to retry failures).
-
-## Read the results
-
-Show the user the **verdict** and **recommendation** (never the raw category). Point them at
-`references/interpreting-results.md`. The short version:
-
-| verdict | what it means | do |
+| verdict | meaning | do |
 |---|---|---|
-| `fable_friendly` | clean on Fable | build on Fable |
-| `config_overtrigger` | config wording trips Fable, project is benign | reword `CLAUDE.md`/`.claude`, re-run |
-| `config_sensitive` | config reads sensitive to every model | rework wording / keep on Opus |
-| `code_overtrigger` | Fable over-triggers on benign code | use Opus here |
+| `fable_friendly` | every component cooperates | build on Fable |
+| `code_overtrigger` | Fable balks on some component(s), but Opus+Sonnet answer → benign | use Opus for those; rest on Fable |
 | `code_sensitive` | genuinely sensitive to every model | Opus, with care |
 | `*_ambiguous` | controls split | `--adjudicate`, or review |
 
+The `components` column names which parts trip, e.g. `frontend=friendly; backend=sensitive`.
+
+## Prerequisites
+
+- **Default (CLI mode):** just Claude Code — probes go through `claude -p` (free Fable via the
+  subscription). No API key.
+- **CodexBar (optional, for the real % of plan):** the `codexbar` CLI (a public fork,
+  github.com/konon4/CodexBar). scoperoute auto-discovers it and degrades to asking the tier if it's
+  missing, config-broken, or not logged in.
+- **`--api` mode** (clean raw-refusal signal, `summary` probe, `--batch` 50% off): `pip install anthropic`
+  + API Fable access.
+- **Fable needs ≥30-day data retention** — ZDR → 400 on every request; check this before the API key.
+
 ## Invariants (do not break)
 
-- **Metadata only.** Reports carry verdicts, recommendations, and per-model tripped flags — never prompt
-  content. Refusal **categories are private**: they go only to the local `scoperoute_report.jsonl` (and,
-  opt-in, `scoperoute_report.private.csv` via `--show-categories`), never the shareable `.csv`. Never
-  surface a refusal's explanation URL.
-- **Fail toward Opus, never coax.** `code_sensitive` / `config_sensitive` go to Opus; the tool does not
-  try to get Fable to comply.
-
-## Cost
-
-Benign ~16-token probes; controls run only on tripped variants; effort is `low` for controls. `--api
---batch` is 50 % off. In CLI mode everything is covered by your Claude Code subscription.
+- **Metadata only; categories private.** Reports carry verdicts, recommendations, per-component flags —
+  never code. The shareable CSV never contains refusal categories; those stay in the gitignored JSONL
+  (opt-in `.private.csv` via `--show-categories`). Never emit a refusal's explanation URL. Redact
+  CodexBar identities.
+- **Fail toward Opus, never coax.** `*_sensitive` → Opus.

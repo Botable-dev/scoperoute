@@ -25,9 +25,10 @@ context buckets, and the invariants; read it before extending.
 .claude-plugin/{plugin.json, marketplace.json}   # plugin + self-hosted marketplace metadata
 skills/scoperoute/
   SKILL.md                                        # user-invocable: true → /scoperoute
-  scripts/scoperoute.py                           # Phase 1 engine + backends + summary-mode orchestration
+  scripts/scoperoute.py                           # engine + backends + orchestration; --probe arch is DEFAULT
   scripts/archprobe.py                            # --probe arch: no-trim recon->summary->per-component probe
-  scripts/estimate.py                             # --estimate: pre-run cost/size calculator
+  scripts/estimate.py                             # --estimate: pre-run calculator, per-stage (Sonnet/Opus/Fable) + per-model
+  scripts/subscription.py                         # CodexBar tier/usage/spend + run $ and % of plan + "run first"
   scripts/fable_watch.py                          # Phase 2 live fallback monitor
   scripts/transcript.py                           # shared metadata-only transcript reader
   references/{interpreting-results, how-it-works, claude-session-sync-README}.md
@@ -37,12 +38,15 @@ PRD_scoperoute.md · README.md · LICENSE · .gitignore
 ## Run / setup
 
 ```bash
-# default CLI backend — free Fable via the Claude Code subscription, no API key
-python skills/scoperoute/scripts/scoperoute.py --root ~/dev --jobs 4
-python skills/scoperoute/scripts/scoperoute.py --projects ~/dev/a ~/dev/b   # fast smoke test
-# API backend — cleanest raw-refusal signal; --batch = 50% off (needs `pip install anthropic` + API Fable)
-python skills/scoperoute/scripts/scoperoute.py --root ~/dev --api --batch --adjudicate
+SR=skills/scoperoute/scripts/scoperoute.py
+python $SR --root ~/dev --repeat 3 --estimate            # ALWAYS first: tokens/$ per part + % of plan
+python $SR --root ~/dev --repeat 3 --jobs 4              # arch (default), CLI/free-Fable, resumable
+python $SR --projects ~/dev/a ~/dev/b                     # quick subset
+python $SR --root ~/dev --api --batch --adjudicate        # API summary mode; --batch = 50% off
 ```
+`--estimate` prints the per-stage (Sonnet recon → Opus summary → Fable probe) + per-model breakdown and a
+Subscription block: real tier/usage/spend from CodexBar (`subscription.py`), run $, **% of plan**, and a
+"run first" ranking. `--tier {pro,max5,max20,team}` / `--plan-usd N` when CodexBar can't detect it.
 
 No lint/test tooling. The engine is stdlib-only in CLI mode; `--api`/`--batch` import `anthropic`
 lazily. There are deterministic tests worth re-creating when you change logic (see Verification below).
@@ -56,8 +60,9 @@ tripped** → `calibrate` (`fable_specific`/`genuinely_sensitive`/`ambiguous`) �
 verdicts (`*_overtrigger` vs `*_sensitive`). Optional `--adjudicate` = Opus 4.8 structured tie-break on
 `*_ambiguous`. `--repeat N` = majority vote via `repeat_probe` (adds a `trip_fraction`).
 
-**Two probe modes (`--probe`):** `summary` (default) is the above — cheap, but samples code within
-`--max-context-chars` (a compromise). `arch` (`archprobe.py`, CLI only) is the **no-trim** path:
+**Two probe modes (`--probe`):** **`arch` is the DEFAULT** (resolves to `summary` under `--api`, which
+can't do agentic recon). `summary` is the cheap fallback — samples code within `--max-context-chars`.
+`arch` (`archprobe.py`, CLI only) is the **no-trim** path:
 `CLIBackend.recon` (Sonnet 5 agentic, reads files itself, retried) → `summarize_arch` (Opus) →
 per-component `probe_text` on an "improve architecture" task → per-component verdicts rolled up to the
 project (`archprobe._rollup`). `estimate.py` (`--estimate`) prices any run before it starts and is the

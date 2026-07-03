@@ -50,6 +50,7 @@ from pathlib import Path
 # shared transcript reader lives beside this file
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import transcript as T  # noqa: E402
+import estimate as E    # noqa: E402
 
 # ---------------------------------------------------------------- config
 
@@ -729,6 +730,10 @@ def main():
                     help="Base name; writes .csv (+ .jsonl source of truth).")
     ap.add_argument("--max-context-chars", type=int, default=60000,
                     help="Per-request context budget (~4 chars/token).")
+    ap.add_argument("--estimate", action="store_true",
+                    help="Print a cost/size estimate and exit (no probes).")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="Probe repeats per unit for a majority vote (also drives --estimate).")
     ap.add_argument("--api", action="store_true", help="Use the Anthropic SDK (clean signal).")
     ap.add_argument("--batch", action="store_true", help="API only: 50%%-off Batch API run.")
     ap.add_argument("--adjudicate", action="store_true",
@@ -754,6 +759,10 @@ def main():
     if not projects:
         sys.exit("No projects found.")
 
+    if args.estimate:                       # calculator-only mode — no probes
+        E.print_report(E.summarize(projects, args.repeat), args.repeat)
+        return
+
     jsonl_path = args.out.with_suffix(".jsonl")
     done = {} if args.refresh else load_done(jsonl_path)
     if args.refresh and jsonl_path.exists():
@@ -764,7 +773,11 @@ def main():
     todo = [p for p in projects if str(p) not in done]
     backend_name = "API" if args.api else "CLI (claude -p)"
     print(f"scoperoute: {len(todo)} to probe, {len(done)} resumed  ·  backend: {backend_name}  "
-          f"·  Fable={FABLE_MODEL}\n")
+          f"·  Fable={FABLE_MODEL}")
+    if todo:                                # calculator before start
+        _e = E.summarize(todo, args.repeat)
+        print(f"  est ~${sum(x.usd_min for x in _e):.2f}–${sum(x.usd_max for x in _e):.2f} "
+              f"notional  (run with --estimate for the per-project breakdown)\n")
 
     if args.api:
         backend = APIBackend()

@@ -332,8 +332,13 @@ def _cli_error_hint(proc) -> str | None:
     result so a hard failure reads better than 'no_transcript_turn'."""
     data = _extract_cli_json(proc.stdout, want_result=False)
     if isinstance(data, dict):
+        result = str(data.get("result") or "")
+        low = result.lower()
+        if any(k in low for k in ("usage limit", "rate limit", "limit reached", "quota",
+                                  "out of", "run out", "capped", "upgrade to", "resets at")):
+            return "fable_usage_capped"          # hit the Claude usage cap — not a real refusal
         if data.get("is_error") or str(data.get("subtype", "")).startswith("error"):
-            return f"cli_error:{data.get('subtype') or 'unknown'}"
+            return f"cli_error:{data.get('subtype') or 'unknown'}" + (f":{result[:60]}" if result else "")
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()[-1:] or [""]
         return f"cli_rc{proc.returncode}:{tail[0][:80]}"
@@ -647,7 +652,7 @@ PRIVATE_EXTRA = ["_bare_category", "_full_category", "_opus_category", "_sonnet_
 MARK = {"fable_friendly": "OK ", "config_overtrigger": "FIX", "config_sensitive": "OPU",
         "config_ambiguous": "?  ", "code_overtrigger": "OPU", "code_sensitive": "OPU",
         "code_ambiguous": "?  ", "config_triggered": "?  ", "code_triggered": "?  ",
-        "error": "ERR"}
+        "incomplete": "INC", "error": "ERR"}
 
 
 def load_done(jsonl_path: Path) -> dict[str, dict]:

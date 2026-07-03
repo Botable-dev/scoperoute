@@ -120,8 +120,15 @@ def triage_arch(backend, project: Path, args) -> dict:
 
 
 def _rollup(project: Path, comps: list[dict], backend, args) -> dict:
+    errored = [c for c in comps if c["verdict"] == "comp_error"]
     real = [c for c in comps if c["verdict"] != "comp_error"]
-    if real and all(c["verdict"] == "comp_friendly" for c in real):
+    capped = any((c.get("error") or "").startswith("fable_usage_capped") for c in comps)
+
+    # Don't call a project friendly if we never actually probed most of it (usage cap,
+    # transient errors). That's "incomplete", not a clean bill of health.
+    if capped or (errored and len(errored) * 2 >= len(comps)):
+        project_verdict = "incomplete"
+    elif real and all(c["verdict"] == "comp_friendly" for c in real):
         project_verdict = "fable_friendly"
     else:
         worst = max(comps, key=lambda c: _RANK.get(c["verdict"], 0))
@@ -132,8 +139,15 @@ def _rollup(project: Path, comps: list[dict], backend, args) -> dict:
     breakdown = "; ".join(f"{c['name']}={c['verdict'].replace('comp_', '')}{frac(c)}" for c in comps)
 
     tripping = [c for c in comps if c["verdict"] not in ("comp_friendly", "comp_error")]
-    if project_verdict == "fable_friendly":
-        recommendation = "Build on Fable — every component cooperates."
+    if project_verdict == "incomplete":
+        why = "Fable usage cap" if capped else "errors"
+        recommendation = (f"Incomplete — {len(errored)}/{len(comps)} components didn't finish ({why}). "
+                          f"Re-run with --only-errors once your Fable quota resets; don't trust the "
+                          f"per-component verdicts yet.")
+    elif project_verdict == "fable_friendly":
+        note = (f" ({len(errored)} component(s) errored — re-run --only-errors to confirm)"
+                if errored else "")
+        recommendation = "Build on Fable — every probed component cooperates." + note
     elif tripping:
         parts = ", ".join(f"{c['name']} ({c['verdict'].replace('comp_', '')})" for c in tripping)
         recommendation = (f"Fable balks on: {parts}. Use Opus for those components; the rest is "

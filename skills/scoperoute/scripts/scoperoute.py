@@ -80,9 +80,15 @@ CODE_EXT = {
 
 # ---------------------------------------------------------------- context (verbatim from v0)
 
-def read_text(path: Path, max_chars: int) -> str:
+# NOTE: no truncation by default. `max_chars` / `max_entries` / `budget_chars` are
+# opt-in caps (None = read everything). Char-trimming a codebase is an anti-pattern —
+# see references/how-it-works.md. (Only used by the legacy summary probe; arch mode
+# reads files agentically with no cap at all.)
+
+def read_text(path: Path, max_chars: int | None = None) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="ignore")[:max_chars]
+        t = path.read_text(encoding="utf-8", errors="ignore")
+        return t[:max_chars] if max_chars else t
     except Exception:
         return ""
 
@@ -91,35 +97,33 @@ def git_status(project: Path) -> str:
     try:
         out = subprocess.run(
             ["git", "-C", str(project), "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True,
         )
-        return out.stdout[:2000]
+        return out.stdout
     except Exception:
         return ""
 
 
-def file_tree(project: Path, max_entries: int = 400) -> list[str]:
+def file_tree(project: Path, max_entries: int | None = None) -> list[str]:
     entries: list[str] = []
     for root, dirs, files in os.walk(project):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
         for f in files:
-            rel = os.path.relpath(os.path.join(root, f), project)
-            entries.append(rel)
-            if len(entries) >= max_entries:
+            entries.append(os.path.relpath(os.path.join(root, f), project))
+            if max_entries and len(entries) >= max_entries:
                 return sorted(entries)
     return sorted(entries)
 
 
-def sample_sources(project: Path, tree: list[str], budget_chars: int) -> str:
+def sample_sources(project: Path, tree: list[str], budget_chars: int | None = None) -> str:
     chunks: list[str] = []
     used = 0
-    per_file = 4000
     for rel in tree:
-        if used >= budget_chars:
+        if budget_chars and used >= budget_chars:
             break
         if Path(rel).suffix.lower() not in CODE_EXT:
             continue
-        text = read_text(project / rel, per_file)
+        text = read_text(project / rel)                 # full file, no per-file cap
         if not text.strip():
             continue
         block = f"\n### FILE: {rel}\n{text}\n"
@@ -128,26 +132,26 @@ def sample_sources(project: Path, tree: list[str], budget_chars: int) -> str:
     return "".join(chunks)
 
 
-def collect_context(project: Path, include_config: bool, budget_chars: int) -> str:
+def collect_context(project: Path, include_config: bool, budget_chars: int | None = None) -> str:
     """bare (include_config=False) = code tree + source sample only.
-    full (include_config=True)  = the same + CLAUDE.md + .claude/**/*.md."""
+    full (include_config=True)  = the same + CLAUDE.md + .claude/**/*.md.
+    budget_chars is an opt-in cap; None (the default) = no truncation."""
     tree = file_tree(project)
     parts = [f"# PROJECT: {project.name}\n"]
 
     if include_config:
         claude_md = project / "CLAUDE.md"
         if claude_md.exists():
-            parts.append(f"\n## CLAUDE.md\n{read_text(claude_md, 8000)}\n")
+            parts.append(f"\n## CLAUDE.md\n{read_text(claude_md)}\n")
         claude_dir = project / ".claude"
         if claude_dir.exists():
             for md in sorted(claude_dir.rglob("*.md")):
-                rel = md.relative_to(project)
-                parts.append(f"\n## {rel}\n{read_text(md, 4000)}\n")
+                parts.append(f"\n## {md.relative_to(project)}\n{read_text(md)}\n")
 
     for name in ("README.md", "README.rst", "README.txt", "README"):
         p = project / name
         if p.exists():
-            parts.append(f"\n## README\n{read_text(p, 4000)}\n")
+            parts.append(f"\n## README\n{read_text(p)}\n")
             break
 
     status = git_status(project)
@@ -155,10 +159,10 @@ def collect_context(project: Path, include_config: bool, budget_chars: int) -> s
         parts.append(f"\n## git status\n{status}\n")
 
     parts.append("\n## FILE TREE\n" + "\n".join(tree) + "\n")
-    used = sum(len(p) for p in parts)
-    remaining = max(0, budget_chars - used)
+    remaining = (budget_chars - sum(len(p) for p in parts)) if budget_chars else None
     parts.append("\n## SOURCE SAMPLE\n" + sample_sources(project, tree, remaining))
-    return "".join(parts)[:budget_chars]
+    out = "".join(parts)
+    return out[:budget_chars] if budget_chars else out
 
 
 def find_projects(root: Path) -> list[Path]:
@@ -207,7 +211,7 @@ class CLIBackend:
     full alike), so it does not affect the bare-vs-full delta.
     """
 
-    def __init__(self, claude_bin="claude", timeout=180, max_budget=None, extra_args=None):
+    def __init__(self, claude_bin="claude", timeout=None, max_budget=None, extra_args=None):
         self.claude_bin = claude_bin
         self.timeout = timeout
         self.max_budget = max_budget
@@ -284,7 +288,7 @@ class CLIBackend:
             try:
                 _sid, proc = self._run("claude-sonnet-5", prompt, effort, json_schema=json_schema,
                                        allowed_tools=["Read", "Glob", "Grep", "LS"],
-                                       cwd=str(project_path), timeout=max(self.timeout, 360))
+                                       cwd=str(project_path), timeout=self.timeout)
             except Exception as e:
                 last = f"exc:{type(e).__name__}"
                 continue
@@ -824,8 +828,10 @@ def main():
     g.add_argument("--projects", type=Path, nargs="+", help="Explicit project paths.")
     ap.add_argument("--out", type=Path, default=Path("scoperoute_report"),
                     help="Base name; writes .csv (+ .jsonl source of truth).")
-    ap.add_argument("--max-context-chars", type=int, default=60000,
-                    help="Per-request context budget (~4 chars/token).")
+    ap.add_argument("--max-context-chars", type=int, default=None,
+                    help="Opt-in cap on summary-mode context chars (default: no cap — read everything).")
+    ap.add_argument("--probe-timeout", type=int, default=None,
+                    help="Opt-in per-call timeout in seconds for `claude -p` (default: no cap).")
     ap.add_argument("--estimate", action="store_true",
                     help="Print a cost/size estimate and exit (no probes).")
     ap.add_argument("--repeat", type=int, default=1,
@@ -850,6 +856,9 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="Re-probe everything (ignore resume).")
     ap.add_argument("--only-errors", action="store_true", help="Re-probe only prior error rows.")
     ap.add_argument("--jobs", type=int, default=1, help="Parallel projects (CLI backend).")
+    ap.add_argument("--yes", "-y", action="store_true",
+                    help="Actually run the probes (spends Fable quota). Without it, scoperoute lists "
+                         "the projects + cost and stops so you can approve first.")
     ap.add_argument("--claude-bin", default="claude", help="Path to the claude binary (CLI mode).")
     ap.add_argument("--max-budget-usd", type=float, default=None, help="Per-probe spend cap (CLI mode).")
     ap.add_argument("--cli-arg", action="append", default=[],
@@ -890,10 +899,18 @@ def main():
     backend_name = "API" if args.api else "CLI (claude -p)"
     print(f"scoperoute: {len(todo)} to probe, {len(done)} resumed  ·  backend: {backend_name}  "
           f"·  Fable={FABLE_MODEL}")
-    if todo:                                # calculator before start
-        _e = E.summarize(todo, args.repeat)
-        print(f"  est ~${sum(x.usd_min for x in _e):.2f}–${sum(x.usd_max for x in _e):.2f} "
-              f"notional  (run with --estimate for the per-project breakdown)\n")
+
+    if todo and not args.yes:
+        # Approval gate — probing spends Fable quota. Show exactly what would run, then stop.
+        import subscription as SUB
+        snap = None if args.no_codexbar else SUB.snapshot()
+        print(f"\nWould probe {len(todo)} project(s) on Fable ({args.probe} mode, repeat={args.repeat}):")
+        for p in todo:
+            print(f"  - {p.name}")
+        print(SUB.format_block(E.summarize(todo, args.repeat), args.tier, args.plan_usd, snap))
+        print("\nNothing was run — Fable quota untouched. Re-run with --yes to proceed, "
+              "or --estimate for the full per-part breakdown.")
+        return
 
     if args.api:
         backend = APIBackend()
@@ -902,8 +919,8 @@ def main():
         else:
             new = run_live(backend, todo, args, jsonl_path)
     else:
-        backend = CLIBackend(claude_bin=args.claude_bin, max_budget=args.max_budget_usd,
-                             extra_args=args.cli_arg)
+        backend = CLIBackend(claude_bin=args.claude_bin, timeout=args.probe_timeout,
+                             max_budget=args.max_budget_usd, extra_args=args.cli_arg)
         new = run_live(backend, todo, args, jsonl_path)
 
     # merge resumed + new (dedupe by project), render reports

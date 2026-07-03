@@ -36,10 +36,13 @@ PRICING = {
 }
 CHARS_PER_TOKEN = 3.2       # rough for source code (denser than the ~4.0 of prose)
 RECON_OVERHEAD = 1.5        # agentic recon re-reads files / adds tool+thinking tokens
-# "Don't trim" != "read 49M tokens of video-metadata JSON". Recon reads
-# human-authored source, skips data/generated/vendored files, and is bounded:
-MAX_FILE_BYTES = 200_000    # a hand-written source file is ~never bigger; above = data/generated
-RECON_INPUT_CAP = 300_000   # tokens: recon reads a representative slice, then summarizes
+# These are ESTIMATION-ONLY heuristics — they model how much the agentic recon is
+# assumed to READ for the cost projection. They do NOT truncate any triage data: the
+# real arch recon reads files agentically with no cap. They exist so the estimate is
+# realistic ("read everything" must not project reading 49M tokens of video-metadata
+# JSON). Tune them if your projection looks off; they never affect a verdict.
+MAX_FILE_BYTES = 200_000    # exclude data/generated blobs from the cost projection
+RECON_INPUT_CAP = 300_000   # tokens the recon is assumed to sample before summarizing
 RECON_OUT_BASE = 800        # Sonnet recon output: inventory + per-component notes
 RECON_OUT_PER_COMPONENT = 200
 SUMMARY_OUT_PER_COMPONENT = 1000   # Opus arch.md per component

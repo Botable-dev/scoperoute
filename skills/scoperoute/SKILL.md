@@ -42,13 +42,17 @@ routes; for a genuinely sensitive project the answer is Opus, never coaxing Fabl
 3. **Present the plan.** Show the per-part cost, the % of their subscription, and what to run first
    (cheapest → dearest; flag the 1–2 cost-dominant projects). Let the user choose scope.
 
-4. **Run the triage** (on their go):
+4. **Run the triage — but it's gated.** A bare run **does not spend Fable**: it lists the exact
+   projects it would probe, the current Fable-quota %, and the cost, then **stops**. Show that to the
+   user, get their explicit OK on the projects and spend, then add `--yes`:
    ```bash
-   python "$SR" --root <path> --repeat 3 --jobs 4          # arch is the default
-   python "$SR" --projects <a> <b>                          # a quick subset
+   python "$SR" --root <path> --repeat 3                    # lists projects + cost, STOPS (no Fable)
+   python "$SR" --root <path> --repeat 3 --jobs 4 --yes     # runs it (arch default), after approval
+   python "$SR" --projects <a> <b> --yes                    # a quick, approved subset
    ```
-   Resumable — it appends one line per finished project and skips completed ones (`--refresh` to redo,
-   `--only-errors` to retry).
+   Fable quota is the scarce resource (a 16-project × repeat-3 sweep can use ~a third of the weekly Fable
+   window), so **always confirm before `--yes`**. Resumable — it appends one line per finished project and
+   skips completed ones (`--refresh` to redo, `--only-errors` to retry).
 
 5. **Read results.** Present each project's **verdict** and **recommendation** (never the raw category),
    including the per-component breakdown. Point to `references/interpreting-results.md`.

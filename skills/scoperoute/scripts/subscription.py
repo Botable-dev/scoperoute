@@ -200,7 +200,7 @@ def format_block(ests, tier: str | None, plan_usd: float | None, snap: dict | No
     if snap:
         if snap.get("tier_label"):
             lines.append(f"  detected plan: {snap['tier_label']}  (via CodexBar)")
-        for w in snap.get("windows", [])[:4]:
+        for w in snap.get("windows", []):
             r = f" · resets {w['resets']}" if w.get("resets") else ""
             lines.append(f"    current usage — {w['window']}: {w['used_percent']}% used{r}")
         sp = snap.get("spend") or {}
@@ -222,13 +222,8 @@ def format_block(ests, tier: str | None, plan_usd: float | None, snap: dict | No
                      f"(or --plan-usd N) for the % of your plan.")
 
     lines.append("  run these first (cheapest → dearest):")
-    ranked = rank_run_first(ests)
-    for e in ranked[:5]:
+    for e in rank_run_first(ests):
         lines.append(f"    ${e.usd_min:>5.2f}  {Path(e.project).name}")
-    if len(ranked) > 5:
-        dear = ranked[-1]
-        lines.append(f"    … {len(ranked) - 5} more; most expensive: {Path(dear.project).name} "
-                     f"(${dear.usd_min:.2f}–${dear.usd_max:.2f})")
     return "\n".join(lines)
 
 

@@ -48,6 +48,13 @@ python $SR --root ~/dev --api --batch --adjudicate        # API summary mode; --
 Subscription block: real tier/usage/spend from CodexBar (`subscription.py`), run $, **% of plan**, and a
 "run first" ranking. `--tier {pro,max5,max20,team}` / `--plan-usd N` when CodexBar can't detect it.
 
+**Approval gate:** a bare run (no `--yes`) lists the projects it would probe + the Fable-quota % + cost
+and **stops without spending Fable**; `--yes`/`-y` actually runs it. **No artificial caps:** context is
+read in full (no `--max-context-chars` cap by default) and `claude -p` calls have no timeout by default
+(char-trimming is an anti-pattern; opt back in with `--max-context-chars N` / `--probe-timeout N`).
+`estimate.py`'s `MAX_FILE_BYTES`/`RECON_INPUT_CAP` are estimation-only heuristics — they never truncate
+triage data.
+
 No lint/test tooling. The engine is stdlib-only in CLI mode; `--api`/`--batch` import `anthropic`
 lazily. There are deterministic tests worth re-creating when you change logic (see Verification below).
 

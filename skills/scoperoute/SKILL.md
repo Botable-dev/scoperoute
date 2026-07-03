@@ -52,15 +52,24 @@ Details: `references/how-it-works.md`. Verdict table: `references/interpreting-r
 ## Run it
 
 ```bash
-# default: free Fable via the CLI, parallelized
-python "${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py" --root ~/dev --jobs 4
+SR="${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py"
 
-# a fast smoke test on two known repos
-python "${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py" --projects ~/dev/a ~/dev/b
+# ALWAYS estimate first — shows cost/tokens per project and for the whole root, no probes:
+python "$SR" --root ~/dev --probe arch --repeat 3 --estimate
 
-# clean signal via the API, 50%-off bulk, tie-break ambiguous cases
-python "${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py" --root ~/dev --api --batch --adjudicate
+# fast first pass (cheap benign-summarize probe, parallel):
+python "$SR" --root ~/dev --jobs 4
+
+# accurate, no-trim, per-component (recon->summary->improve-architecture), majority vote:
+python "$SR" --root ~/dev --probe arch --repeat 3
+
+# clean raw-refusal signal via the API (summary mode), 50%-off bulk:
+python "$SR" --root ~/dev --api --batch --adjudicate
 ```
+
+- `--probe arch` distills instead of truncating (no `--max-context-chars` limit) and gives per-component
+  verdicts; `--repeat N` turns a coin-flip into a trip fraction. Both are worth it for real decisions.
+- `--estimate` is important before any `--root` sweep — the arch pipeline reads whole codebases.
 
 Resumable: it appends one line per finished project to `scoperoute_report.jsonl` and skips completed
 projects on re-run (`--refresh` to redo, `--only-errors` to retry failures).

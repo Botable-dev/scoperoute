@@ -55,6 +55,13 @@ Method + privacy: [`how-it-works.md`](skills/scoperoute/references/how-it-works.
 | **CLI** (default) | `claude -p --model claude-fable-5` | just Claude Code (free Fable) | refusal read from the session transcript |
 | **API** (`--api`) | Anthropic SDK | `pip install anthropic` + API Fable | raw `stop_reason=="refusal"`; `--batch` = 50 % off |
 
+**Probe depth.** `--probe summary` (default) is a cheap one-liner probe. `--probe arch` is the accurate,
+**no-trim** path: Sonnet reads the whole codebase itself, Opus writes a per-component architecture
+summary, and Fable is asked to *improve* each component — so you get per-component verdicts
+(`frontend=friendly; backend=sensitive`). Add `--repeat 3` to turn a borderline coin-flip into a trip
+fraction. Always `--estimate` first — it prices the run per project and for the whole root before you
+spend anything.
+
 ## Privacy
 
 Metadata only. Reports carry verdicts, recommendations, and per-model tripped flags — never prompt

@@ -25,7 +25,9 @@ context buckets, and the invariants; read it before extending.
 .claude-plugin/{plugin.json, marketplace.json}   # plugin + self-hosted marketplace metadata
 skills/scoperoute/
   SKILL.md                                        # user-invocable: true → /scoperoute
-  scripts/scoperoute.py                           # Phase 1 engine (evolved from the old fable_triage.py)
+  scripts/scoperoute.py                           # Phase 1 engine + backends + summary-mode orchestration
+  scripts/archprobe.py                            # --probe arch: no-trim recon->summary->per-component probe
+  scripts/estimate.py                             # --estimate: pre-run cost/size calculator
   scripts/fable_watch.py                          # Phase 2 live fallback monitor
   scripts/transcript.py                           # shared metadata-only transcript reader
   references/{interpreting-results, how-it-works, claude-session-sync-README}.md
@@ -52,7 +54,15 @@ lazily. There are deterministic tests worth re-creating when you change logic (s
 `code_triggered`/`error`) → controls (Opus 4.8 @ high, Sonnet 5 @ low) **only on the variant that
 tripped** → `calibrate` (`fable_specific`/`genuinely_sensitive`/`ambiguous`) → `combine` into 6 final
 verdicts (`*_overtrigger` vs `*_sensitive`). Optional `--adjudicate` = Opus 4.8 structured tie-break on
-`*_ambiguous`.
+`*_ambiguous`. `--repeat N` = majority vote via `repeat_probe` (adds a `trip_fraction`).
+
+**Two probe modes (`--probe`):** `summary` (default) is the above — cheap, but samples code within
+`--max-context-chars` (a compromise). `arch` (`archprobe.py`, CLI only) is the **no-trim** path:
+`CLIBackend.recon` (Sonnet 5 agentic, reads files itself, retried) → `summarize_arch` (Opus) →
+per-component `probe_text` on an "improve architecture" task → per-component verdicts rolled up to the
+project (`archprobe._rollup`). `estimate.py` (`--estimate`) prices any run before it starts and is the
+guard that keeps "no trim" from meaning "read 49M tokens" (it skips data/generated/vendored/oversize
+files via `is_source_file`). Char-truncation is treated as an anti-pattern — see `references/how-it-works.md`.
 
 **Two backends (`--api` toggles):**
 - `CLIBackend` (default): `claude -p --model … --output-format json --session-id <uuid>` from a **neutral

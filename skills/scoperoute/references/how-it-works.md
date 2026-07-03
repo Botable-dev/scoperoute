@@ -50,18 +50,44 @@ no value on `fable_friendly` projects.
 - A refusal's `explanation` field carries a live, tokened URL — scoperoute never reads or emits it, only
   the category label.
 
+## Two probe modes
+
+- **`--probe summary` (default, cheap).** One benign "summarize this project" probe on a `bare`/`full`
+  context. Fast and free-ish, good for a first pass — but it samples the code within a char budget
+  (`--max-context-chars`), which is a compromise, and the mild request under-detects (see Limitations).
+- **`--probe arch` (accurate, no trimming).** The distillation pipeline: Sonnet 5 (low effort) reads the
+  project's files *itself* (agentic — no truncation, any repo size) and inventories its components →
+  Opus writes a clean architecture summary per component → Fable is asked to *improve the architecture*
+  of each component (a real engineering task, not a one-liner) and we watch for a refusal. Per-component,
+  so you see `frontend=friendly; backend=sensitive` and know not to build the backend on Fable. CLI
+  backend only.
+
+## No trimming (it's an anti-pattern)
+
+Char-truncating a codebase to a byte budget cuts mid-file and drops whatever's past the budget — the
+model judges a mutilated fragment. `--probe arch` never does this: it **distills** (an agent reads the
+whole thing incrementally and summarizes) instead of **truncating**. `--max-context-chars` only affects
+the legacy `summary` mode; `arch` ignores it. Before a run, `scoperoute … --estimate` (or `python
+estimate.py --root …`) shows the token/cost estimate per project and for the whole workplace — the
+estimator skips data/generated/vendored/oversize files, because "read everything" must not mean reading
+49 MB of video-metadata JSON.
+
+## Repeat for a real signal
+
+The classifier is **not deterministic near its boundary** — a borderline component trips on one probe
+and not the next. `--repeat N` probes each unit N times and reports a **trip fraction** (`3/5`) plus a
+majority verdict, so you can tell a stable trip from a coin-flip. Use `--repeat 3`–`5` for decisions.
+
 ## Limitations (know these)
 
-- **Cold triage under-detects.** One benign probe at rest is the mildest possible request; Fable will
-  serve it on most projects even where it later balks *during real coding* (new files enter context, tool
-  outputs, a growing diff). That runtime trigger is what Phase 2 (`fable_watch.py`) is for — a
-  `fable_friendly` cold verdict is a starting hypothesis, not a guarantee.
-- **The classifier is not perfectly deterministic near its boundary.** A borderline project can trip on
-  one probe and not the next (in practice we've seen `bare` trip while `full` doesn't). Treat a lone trip
-  on a borderline project as a signal to look closer, not a hard label; re-run to confirm.
+- **Cold triage under-detects.** Even `arch`'s "improve architecture" is milder than a long real coding
+  session where new files, tool outputs, and a growing diff enter context. A `fable_friendly` cold
+  verdict is a starting hypothesis; Phase 2 (`fable_watch.py`) confirms it at runtime.
 - **CLI mode loses the category on a masked fallback.** When Claude Code answers a refused Fable turn by
   silently falling back to Opus, there is no refusal turn to read a category from — scoperoute still marks
-  the project tripped (served model diverged), but `category` is blank. Use `--api` for the raw category.
+  it tripped (served model diverged), but `category` is blank. Use `--api` for the raw category.
+- **Agentic recon fails transiently under load** and is retried; a project that still errors after
+  retries is reported as `error` (re-run with `--only-errors`).
 
 ## Troubleshooting an all-error run
 

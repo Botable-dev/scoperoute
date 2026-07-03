@@ -182,6 +182,7 @@ class ProbeResult:
     category: str | None          # refusal category (private; never shipped in the CSV)
     served_model: str | None      # what actually served (may reveal a masked fallback)
     error: str | None
+    trip_fraction: float | None = None   # k/N when probed with --repeat
 
 
 def read_refusal(msg) -> tuple[bool, str | None]:
@@ -213,7 +214,8 @@ class CLIBackend:
         self.extra_args = extra_args or []
         self._workdir = Path(tempfile.mkdtemp(prefix="scoperoute-work-"))
 
-    def _run(self, model, prompt, effort, json_schema=None):
+    def _run(self, model, prompt, effort, json_schema=None, allowed_tools=None,
+             cwd=None, timeout=None):
         sid = str(uuid.uuid4())
         cmd = [self.claude_bin, "-p", prompt, "--model", model,
                "--output-format", "json", "--session-id", sid]
@@ -221,16 +223,19 @@ class CLIBackend:
             cmd += ["--effort", effort]
         if json_schema is not None:
             cmd += ["--json-schema", json.dumps(json_schema)]
+        if allowed_tools:
+            cmd += ["--allowedTools", *allowed_tools]
         if self.max_budget is not None:
             cmd += ["--max-budget-usd", str(self.max_budget)]
         cmd += self.extra_args
         proc = subprocess.run(
-            cmd, cwd=str(self._workdir), capture_output=True, text=True, timeout=self.timeout,
+            cmd, cwd=str(cwd or self._workdir), capture_output=True, text=True,
+            timeout=timeout or self.timeout,
         )
         return sid, proc
 
-    def probe(self, model, context, effort=None) -> ProbeResult:
-        prompt = context + "\n\n---\n" + BENIGN_INSTRUCTION
+    def probe_text(self, model, prompt, effort=None) -> ProbeResult:
+        """Send an arbitrary prompt; read refusal/served-model from the transcript."""
         try:
             sid, proc = self._run(model, prompt, effort)
         except subprocess.TimeoutExpired:
@@ -259,6 +264,56 @@ class CLIBackend:
         if turn.family is not None and want is not None and turn.family != want:
             return ProbeResult(model, True, None, turn.served_model, None)
         return ProbeResult(model, False, None, turn.served_model, None)
+
+    def probe(self, model, context, effort=None) -> ProbeResult:
+        return self.probe_text(model, context + "\n\n---\n" + BENIGN_INSTRUCTION, effort)
+
+    def recon(self, project_path, json_schema, effort="low") -> dict | None:
+        """Agentic Sonnet 5 recon: reads the project's files itself (no trimming),
+        returns a component inventory. Read-only tools only."""
+        prompt = (
+            "Explore THIS project directory using your tools (list, read, grep). "
+            "Identify its distinct components — e.g. frontend, backend, a service, a "
+            "library — or treat the whole thing as one component if it isn't split. "
+            "For each component give a factual architecture note: what it is, its "
+            "stack, key modules, and what it does. Skip vendored deps and data files. "
+            "Return ONLY JSON."
+        )
+        last = ""
+        for _ in range(3):                        # agentic calls fail transiently under load — retry
+            try:
+                _sid, proc = self._run("claude-sonnet-5", prompt, effort, json_schema=json_schema,
+                                       allowed_tools=["Read", "Glob", "Grep", "LS"],
+                                       cwd=str(project_path), timeout=max(self.timeout, 360))
+            except Exception as e:
+                last = f"exc:{type(e).__name__}"
+                continue
+            out = _extract_cli_json(proc.stdout)
+            if isinstance(out, dict) and out.get("components"):
+                return out
+            meta = _extract_cli_json(proc.stdout, want_result=False)
+            sub = meta.get("subtype") if isinstance(meta, dict) else None
+            last = f"rc={proc.returncode} subtype={sub} head={proc.stdout[:160]!r} err={(proc.stderr or '')[:160]!r}"
+        sys.stderr.write(f"[scoperoute] recon failed for {project_path}: {last}\n")
+        return None
+
+    def summarize_arch(self, recon, json_schema, effort="high") -> dict | None:
+        """Opus turns the recon notes into a clean per-component architecture summary."""
+        prompt = (
+            "Below is a recon of a project's components. For each, write a concise, "
+            "self-contained architecture summary (5-10 sentences: purpose, stack, key "
+            "modules, data flow). Keep the same component names. Return ONLY JSON.\n\n"
+            + json.dumps(recon)
+        )
+        for _ in range(3):                        # transient-failure retry
+            try:
+                _sid, proc = self._run("claude-opus-4-8", prompt, effort, json_schema=json_schema)
+            except Exception:
+                continue
+            out = _extract_cli_json(proc.stdout)
+            if isinstance(out, dict) and out.get("components"):
+                return out
+        return None
 
     def judge(self, model, prompt, json_schema, effort="high") -> dict | None:
         try:
@@ -314,8 +369,7 @@ class APIBackend:
         self.anthropic = __import__("anthropic")
         self.client = self.anthropic.Anthropic()
 
-    def probe(self, model, context, effort=None) -> ProbeResult:
-        prompt = context + "\n\n---\n" + BENIGN_INSTRUCTION
+    def probe_text(self, model, prompt, effort=None) -> ProbeResult:
         kwargs = dict(model=model, max_tokens=16,
                       messages=[{"role": "user", "content": prompt}])
         if effort:
@@ -327,6 +381,16 @@ class APIBackend:
             return ProbeResult(model, None, None, None, _api_error_hint(e))
         tripped, category = read_refusal(resp)
         return ProbeResult(model, tripped, category, getattr(resp, "model", None), None)
+
+    def probe(self, model, context, effort=None) -> ProbeResult:
+        return self.probe_text(model, context + "\n\n---\n" + BENIGN_INSTRUCTION, effort)
+
+    def recon(self, project_path, json_schema, effort="low") -> dict | None:
+        # Agentic recon needs a tool-running loop; not implemented on the raw API path.
+        raise NotImplementedError("arch probe mode is CLI-only (agentic recon); drop --api")
+
+    def summarize_arch(self, recon, json_schema, effort="high") -> dict | None:
+        raise NotImplementedError("arch probe mode is CLI-only; drop --api")
 
     def judge(self, model, prompt, json_schema, effort="high") -> dict | None:
         try:
@@ -472,11 +536,36 @@ def adjudicate(backend, tripped_ctx: str, effort="high") -> dict | None:
 
 # ---------------------------------------------------------------- per-project triage
 
+def repeat_probe(backend, model, payload, effort, repeat, text=False) -> ProbeResult:
+    """Probe `repeat` times and take a majority vote. Returns a ProbeResult whose
+    `tripped` is the majority and `trip_fraction` = k/N (the science-y number:
+    stable-trip, stable-clean, or borderline). `text=True` sends the payload as-is
+    (arch mode); otherwise it's a project context and the benign instruction is appended."""
+    trips = ok = 0
+    category = err = None
+    served = None
+    for _ in range(max(1, repeat)):
+        r = backend.probe_text(model, payload, effort) if text else backend.probe(model, payload, effort)
+        served = served or r.served_model
+        if r.error:
+            err = r.error
+            continue
+        ok += 1
+        if r.tripped:
+            trips += 1
+            category = category or r.category
+    if ok == 0:
+        return ProbeResult(model, None, None, served, err, 0.0)
+    frac = trips / ok
+    return ProbeResult(model, frac >= 0.5, category, served, None, round(frac, 3))
+
+
 def triage_project(backend, project: Path, args) -> dict:
+    rep = getattr(args, "repeat", 1)
     bare_ctx = collect_context(project, False, args.max_context_chars)
     full_ctx = collect_context(project, True, args.max_context_chars)
-    bare = backend.probe(FABLE_MODEL, bare_ctx)
-    full = backend.probe(FABLE_MODEL, full_ctx)
+    bare = repeat_probe(backend, FABLE_MODEL, bare_ctx, None, rep)
+    full = repeat_probe(backend, FABLE_MODEL, full_ctx, None, rep)
     fv = classify_fable(bare, full)
 
     # Run controls only on the variant that tripped (halves control spend; a
@@ -491,7 +580,7 @@ def triage_project(backend, project: Path, args) -> dict:
         if tripped_ctx is not None:
             for model, effort in CONTROL_MODELS:
                 short = "opus" if "opus" in model else "sonnet"
-                controls[short] = backend.probe(model, tripped_ctx, effort)
+                controls[short] = repeat_probe(backend, model, tripped_ctx, effort, rep)
 
     calibration = calibrate(controls)
     verdict = combine(fv, calibration)
@@ -503,7 +592,8 @@ def triage_project(backend, project: Path, args) -> dict:
     return build_row(project, bare, full, fv, controls, calibration, verdict, adj, backend)
 
 
-def build_row(project, bare, full, fable_verdict, controls, calibration, verdict, adj, backend) -> dict:
+def build_row(project, bare, full, fable_verdict, controls, calibration, verdict, adj, backend,
+              mode="summary", components="") -> dict:
     opus = controls.get("opus")
     sonnet = controls.get("sonnet")
     return {
@@ -511,6 +601,8 @@ def build_row(project, bare, full, fable_verdict, controls, calibration, verdict
         "project": str(project),
         "verdict": verdict,
         "recommendation": RECOMMENDATIONS.get(verdict, ""),
+        "mode": mode,
+        "components": components,
         "fable_bare_tripped": bare.tripped,
         "fable_full_tripped": full.tripped,
         "opus_tripped": opus.tripped if opus else None,
@@ -540,7 +632,7 @@ def build_row(project, bare, full, fable_verdict, controls, calibration, verdict
 
 # Shareable CSV: verdict + recommendation + flags only. No categories, no reasoning.
 CSV_FIELDS = [
-    "project", "verdict", "recommendation",
+    "project", "verdict", "recommendation", "mode", "components",
     "fable_bare_tripped", "fable_full_tripped", "opus_tripped", "sonnet_tripped",
     "calibration", "adjudicator_verdict", "adjudicator_score", "error",
 ]
@@ -701,7 +793,11 @@ def _emit(project: Path, verdict: str) -> None:
 def run_live(backend, projects, args, jsonl_path) -> list[dict]:
     """Serial or threaded per-project triage with crash-safe resume."""
     def work(project):
-        row = triage_project(backend, project, args)
+        if getattr(args, "probe", "summary") == "arch":
+            import archprobe
+            row = archprobe.triage_arch(backend, project, args)
+        else:
+            row = triage_project(backend, project, args)
         _append_jsonl(jsonl_path, row)
         _emit(project, row["verdict"])
         return row
@@ -734,6 +830,10 @@ def main():
                     help="Print a cost/size estimate and exit (no probes).")
     ap.add_argument("--repeat", type=int, default=1,
                     help="Probe repeats per unit for a majority vote (also drives --estimate).")
+    ap.add_argument("--probe", choices=["summary", "arch"], default="summary",
+                    help="summary = cheap benign-summarize probe (default). "
+                         "arch = no-trim distillation (Sonnet recon -> Opus summary -> Fable "
+                         "'improve architecture') with per-component verdicts. CLI backend only.")
     ap.add_argument("--api", action="store_true", help="Use the Anthropic SDK (clean signal).")
     ap.add_argument("--batch", action="store_true", help="API only: 50%%-off Batch API run.")
     ap.add_argument("--adjudicate", action="store_true",
@@ -753,6 +853,10 @@ def main():
 
     if args.batch and not args.api:
         sys.exit("--batch requires --api.")
+    if args.probe == "arch" and args.api:
+        sys.exit("--probe arch is CLI-only (agentic recon); drop --api.")
+    if args.probe == "arch" and args.batch:
+        sys.exit("--probe arch does not support --batch.")
 
     projects = find_projects(args.root) if args.root else args.projects
     projects = sorted({p.resolve() for p in projects if p.is_dir()})

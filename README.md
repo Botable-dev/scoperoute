@@ -8,6 +8,10 @@ benign work on some projects, falling back to Opus. "Use Fable everywhere" waste
 where it keeps bailing. scoperoute tells you, **per project and per component**, where Fable will
 cooperate — and what the run will cost, in tokens, dollars, and a slice of your Claude plan.
 
+It isn't another code reviewer — Claude Code already ships `/code-review` and `/security-review` for
+finding bugs and vulnerabilities; scoperoute answers the question that comes *before* you build: which
+model each repo should run on, and what that costs.
+
 ## Try it in one paste
 
 Install the plugin (below), then paste this to Claude Code:

@@ -924,6 +924,9 @@ def main():
                     help="Skip Opus/Sonnet controls (Fable-only buckets).")
     ap.add_argument("--show-categories", action="store_true",
                     help="Also write a *.private.csv with refusal categories (gitignored).")
+    ap.add_argument("--no-fable-docs", action="store_true",
+                    help="Skip the default post-run stage that writes each probed repo a "
+                         "<repo>/_fable/fable-architecture-review.md from its own Fable transcripts.")
     ap.add_argument("--refresh", action="store_true", help="Re-probe everything (ignore resume).")
     ap.add_argument("--only-errors", action="store_true", help="Re-probe only prior error rows.")
     ap.add_argument("--jobs", type=int, default=1, help="Parallel projects (CLI backend).")
@@ -1028,6 +1031,22 @@ def main():
         if counts.get(v):
             print(f"  {v:<20} {counts[v]}")
     print(f"\nSource of truth (full, gitignored): {jsonl_path}")
+
+    # Default stage: turn the Fable quota this run spent into a durable artifact —
+    # write each probed repo its own _fable/ review from that run's pinned transcripts.
+    if (not args.api and not args.evaluate and args.probe in ("arch", "code")
+            and not args.no_fable_docs and new):
+        try:
+            import fabledocs
+            wd = getattr(backend, "_workdir", None)
+            written = fabledocs.generate(new, wd) if wd else []
+            if written:
+                print(f"\nFable reviews → {len(written)} repo(s) (_fable/) — the quota you spent, "
+                      f"kept as a durable answer:")
+                for w in written:
+                    print(f"  {w}")
+        except Exception as e:                 # never let a docs failure break a completed run
+            print(f"\n[fable-docs] skipped ({type(e).__name__}: {e}); reports are unaffected.")
 
 
 if __name__ == "__main__":

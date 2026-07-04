@@ -25,14 +25,14 @@ and what it costs.
 One script sets up **both** the terminal command and the Claude Code skill — stdlib only, no API key:
 
 ```bash
-git clone https://github.com/botable/scoperoute && cd scoperoute && ./install.sh
+git clone https://github.com/botable-dev/scoperoute && cd scoperoute && ./install.sh
 scoperoute            # guided, gated wizard — nothing spends Fable until you say yes
 ```
 
 Prefer the marketplace plugin?
 
 ```bash
-claude plugin marketplace add botable/scoperoute
+claude plugin marketplace add botable-dev/scoperoute
 claude plugin install scoperoute@hublab       # then /reload-plugins → /scoperoute:scoperoute
 ```
 
@@ -43,12 +43,12 @@ terminal command; the marketplace plugin gives you **`/scoperoute:scoperoute`**.
 
 Paste to Claude Code:
 
-> Clone github.com/botable/scoperoute, run its `./install.sh`, then run `scoperoute --root ~/dev --estimate`
+> Clone github.com/botable-dev/scoperoute, run its `./install.sh`, then run `scoperoute --root ~/dev --estimate`
 > and show me the cost. If `/scoperoute` isn't active yet, tell me to run `/reload-plugins` or restart.
 
 …or, to jump straight to a subscription-aware estimate:
 
-> install `github.com/botable/scoperoute`, evaluate the tokens/$ per part, ask my Claude plan
+> install `github.com/botable-dev/scoperoute`, evaluate the tokens/$ per part, ask my Claude plan
 > (Pro/Max/Team) to compute my spend in $ and % of the plan, and tell me what to run first.
 
 ## What you get

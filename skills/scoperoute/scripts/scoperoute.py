@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import subprocess
@@ -62,6 +63,9 @@ from verdicts import classify_fable, calibrate, combine, RECOMMENDATIONS, MARK  
 FABLE_MODEL = M.PROBE_MODEL.id
 CONTROL_MODELS = M.control_pairs()      # [(model_id, effort)] — Opus@high, Sonnet@low
 ADJUDICATOR_MODEL = M.ADJUDICATOR.id
+
+VERSION = "0.3.0"        # real-code probe (--probe code) + default fable-docs stage
+SCHEMA_VERSION = 2       # bump when a JSONL record's shape changes (rec #4)
 
 # Benign, non-security instruction: any refusal is attributable to the CONTEXT,
 # not the request. (Verbatim from the v0 engine — satisfies FR1.)
@@ -649,6 +653,25 @@ PRIVATE_EXTRA = ["_bare_category", "_full_category", "_opus_category", "_sonnet_
 
 # MARK (verdict -> console tag) is imported from verdicts.py.
 
+# --- Structural FR4 (Fable rec #4b) ------------------------------------------------
+# The shareable CSV is constructed ONLY from this allowlist, and no allowlisted field
+# may live in private (underscore) space. Enforced at import time + on every projection,
+# so a leak becomes an AssertionError — not something you catch by remembering to omit
+# categories. Private data (categories, reasoning, served models, run metadata, code)
+# only ever reaches the gitignored JSONL / opt-in *.private.csv.
+assert not any(f.startswith("_") for f in CSV_FIELDS), \
+    "FR4: CSV_FIELDS (the shareable allowlist) must contain no private (_-prefixed) field"
+
+
+def sharable_row(row: dict) -> dict:
+    """Project a full record down to the FR4-safe allowlist. Anything not explicitly
+    allowlisted — categories, reasoning, served models, run metadata, real code — is
+    dropped by construction, then re-checked."""
+    out = {k: row.get(k) for k in CSV_FIELDS}
+    leaked = [k for k in out if k.startswith("_")]
+    assert not leaked, f"FR4: private field(s) leaked into shareable row: {leaked}"
+    return out
+
 
 def load_done(jsonl_path: Path) -> dict[str, dict]:
     """Resume: map of already-completed project -> its full record."""
@@ -675,7 +698,7 @@ def render_reports(records: list[dict], base: Path, show_categories: bool) -> No
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
         w.writeheader()
         for r in records:
-            w.writerow(r)
+            w.writerow(sharable_row(r))          # FR4: allowlist projection, not raw row
     print(f"\nShareable report (no categories): {csv_path}")
 
     if show_categories:
@@ -698,6 +721,7 @@ def run_batch(client_backend, projects, args, jsonl_path, done) -> list[dict]:
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
     client = client_backend.client
+    run_meta = build_run_meta(client_backend, args)
 
     todo = [p for p in projects if str(p) not in done]
     idx = {i: p for i, p in enumerate(todo)}
@@ -749,6 +773,7 @@ def run_batch(client_backend, projects, args, jsonl_path, done) -> list[dict]:
         calibration = calibrate(controls)
         verdict = combine(fv, calibration)
         row = build_row(p, b, fu, fv, controls, calibration, verdict, None, client_backend)
+        stamp_row(row, run_meta)
         _append_jsonl(jsonl_path, row)
         records.append(row)
         print(f"  [{MARK.get(verdict, '?  ')}] {p.name:<34} {verdict}")
@@ -782,6 +807,39 @@ def _run_batch(client, reqs) -> dict[str, ProbeResult]:
 _LOCK = threading.Lock()
 
 
+def build_run_meta(backend, args) -> dict:
+    """Run-level provenance stamped onto every JSONL record (Fable rec #4). Records the
+    resolved models + the probe WORKDIR, so the fable-docs stage can find this run's own
+    `claude -p` transcripts deterministically instead of forensic-globbing ~/.claude."""
+    mode = "evaluate" if getattr(args, "evaluate", False) else getattr(args, "probe", None)
+    meta = {
+        "scoperoute_version": VERSION,
+        "backend": type(backend).__name__,
+        "probe_mode": mode,
+        "fable_effort": getattr(args, "fable_effort", None),
+        "repeat": getattr(args, "repeat", 1),
+        "adjudicate": bool(getattr(args, "adjudicate", False)),
+        "models": {"probe": FABLE_MODEL, "controls": CONTROL_MODELS,
+                   "recon": M.RECON_MODEL.id, "summary": M.SUMMARY_MODEL.id},
+        "started_at": int(time.time()),
+    }
+    wd = getattr(backend, "_workdir", None)
+    if wd is not None:
+        meta["workdir"] = str(wd)
+    return meta
+
+
+def stamp_row(row: dict, run_meta: dict) -> dict:
+    """Attach schema version + run metadata + an idempotency key (project+config).
+    All private (JSONL only) except schema_version; never reaches the shareable CSV."""
+    row["schema_version"] = SCHEMA_VERSION
+    row["_run"] = run_meta
+    cfg = f"{run_meta.get('probe_mode')}|r{run_meta.get('repeat')}|{run_meta.get('fable_effort')}"
+    row["_idempotency"] = hashlib.sha1(
+        (str(row.get("project", "")) + "|" + cfg).encode("utf-8")).hexdigest()[:16]
+    return row
+
+
 def _append_jsonl(path: Path, record: dict) -> None:
     with _LOCK:
         with path.open("a", encoding="utf-8") as f:
@@ -796,14 +854,17 @@ def _emit(project: Path, verdict: str) -> None:
 
 def run_live(backend, projects, args, jsonl_path) -> list[dict]:
     """Serial or threaded per-project triage with crash-safe resume."""
+    run_meta = build_run_meta(backend, args)
+
     def work(project):
         if getattr(args, "evaluate", False):
             row = evaluate_project(backend, project, args)
-        elif getattr(args, "probe", "summary") == "arch":
+        elif getattr(args, "probe", "summary") in ("arch", "code"):
             import archprobe
             row = archprobe.triage_arch(backend, project, args)
         else:
             row = triage_project(backend, project, args)
+        stamp_row(row, run_meta)
         _append_jsonl(jsonl_path, row)
         _emit(project, row["verdict"])
         return row

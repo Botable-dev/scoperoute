@@ -34,6 +34,8 @@ git clone https://github.com/botable-dev/scoperoute && cd scoperoute && ./instal
 scoperoute            # guided, gated wizard — nothing spends Fable until you say yes
 ```
 
+![the guided wizard: pick repos → see the cost per stage and as a % of your plan → nothing spends Fable until you approve at the gate](docs/demo.gif)
+
 Prefer the marketplace plugin?
 
 ```bash

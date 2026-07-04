@@ -10,7 +10,7 @@ description: >
   at, says Fable keeps refusing / falling back to Opus, asks "what should I build with free Fable", or
   wants a cost/subscription estimate for a triage. Read-only and benign; detects and routes, never
   bypasses the classifier. By HubLab.ai.
-version: 0.2.0
+version: 0.3.0
 license: MIT
 user-invocable: true
 allowed-tools: Bash, Read
@@ -23,14 +23,22 @@ projects, silently falling back to Opus. scoperoute distills each project and pr
 to tell you where it cooperates — and prices the run before you spend anything. It only detects and
 routes; for a genuinely sensitive project the answer is Opus, never coaxing Fable.
 
-`SR="${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py"`
+Resolve the CLI once — this works whether scoperoute was installed as a plugin, as a personal skill
+(`install.sh`), or the `scoperoute` command is on PATH:
+```bash
+if command -v scoperoute >/dev/null 2>&1; then SR="scoperoute"
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then SR="python3 ${CLAUDE_PLUGIN_ROOT}/skills/scoperoute/scripts/scoperoute.py"
+else SR="python3 $HOME/.claude/skills/scoperoute/scripts/scoperoute.py"; fi
+```
+Then invoke it as `$SR …`. Inside Claude Code, drive it non-interactively with the flags below +
+`AskUserQuestion` for the tier — the terminal `input()` wizard is only for a real TTY.
 
 ## The flow (follow this order)
 
 1. **Estimate first — always.** The default `code` mode distills each repo *and* injects Opus-curated
    real code into the Fable probe (higher fidelity, a bit more Fable spend), so show the cost first:
    ```bash
-   python "$SR" --root <path> --repeat 3 --estimate
+   $SR --root <path> --repeat 3 --estimate
    ```
    This prints tokens/$ **per part** (Sonnet recon → Opus summary → Fable probe → controls) and, when
    CodexBar is available, the user's real tier + current window usage + spend, the run as a **% of their
@@ -48,10 +56,10 @@ routes; for a genuinely sensitive project the answer is Opus, never coaxing Fabl
    projects it would probe, the current Fable-quota %, and the cost, then **stops**. Show that to the
    user, get their explicit OK on the projects and spend, then add `--yes`:
    ```bash
-   python "$SR" --root <path> --repeat 3                    # lists projects + cost, STOPS (no Fable)
-   python "$SR" --root <path> --repeat 3 --jobs 4 --yes     # runs it (code default), after approval
-   python "$SR" --root <path> --probe arch --yes            # cheaper prose-only screen (no code injected)
-   python "$SR" --projects <a> <b> --yes                    # a quick, approved subset
+   $SR --root <path> --repeat 3                    # lists projects + cost, STOPS (no Fable)
+   $SR --root <path> --repeat 3 --jobs 4 --yes     # runs it (code default), after approval
+   $SR --root <path> --probe arch --yes            # cheaper prose-only screen (no code injected)
+   $SR --projects <a> <b> --yes                    # a quick, approved subset
    ```
    Fable quota is the scarce resource (a 16-project × repeat-3 sweep can use ~a third of the weekly Fable
    window), so **always confirm before `--yes`**. Resumable — it appends one line per finished project and

@@ -296,7 +296,7 @@ def main():
                     help="Which pipeline to price: code (default, +Opus curate +real code in the "
                          "Fable payload), arch (prose only), or summary (legacy).")
     ap.add_argument("--tier", choices=["pro", "max5", "max20", "team"], default=None,
-                    help="Claude plan for the $/% math (else CodexBar detects it).")
+                    help="Claude plan for the cost-vs-plan math (else CodexBar detects it).")
     ap.add_argument("--plan-usd", type=float, default=None, help="Override the plan's monthly USD.")
     ap.add_argument("--no-codexbar", action="store_true", help="Don't call CodexBar for real tier/usage.")
     args = ap.parse_args()

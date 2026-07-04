@@ -895,13 +895,144 @@ def run_live(backend, projects, args, jsonl_path) -> list[dict]:
     return records
 
 
+# ---------------------------------------------------------------- interactive wizard (terminal only)
+# A bare `scoperoute` (no scope) drops into a guided flow. Everything is TTY-guarded: piped /
+# headless / inside-Claude-Code runs never prompt and never hang (input()->EOFError returns the
+# default). The flag path and the AskUserQuestion-driven skill are the non-terminal faces of the
+# same tool. See references/how-it-works.md.
+
+def _interactive() -> bool:
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (ValueError, OSError):
+        return False
+
+
+def _ask(prompt: str, default: str = "") -> str:
+    if not _interactive():
+        return default
+    try:
+        ans = input(f"{prompt}" + (f" [{default}]" if default else "") + ": ").strip()
+    except EOFError:
+        return default
+    return ans or default
+
+
+def _confirm(prompt: str, default: bool = True) -> bool:
+    if not _interactive():
+        return default
+    try:
+        ans = input(prompt + (" [Y/n] " if default else " [y/N] ")).strip().lower()
+    except EOFError:
+        return default
+    return default if not ans else ans in ("y", "yes")
+
+
+def _choose(prompt: str, options: list[str], default: int = 0) -> int:
+    if not _interactive():
+        return default
+    for i, opt in enumerate(options, 1):
+        print(f"  {i}. {opt}")
+    while True:
+        try:
+            raw = input(f"{prompt} [{default + 1}]: ").strip()
+        except EOFError:
+            return default
+        if not raw:
+            return default
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return int(raw) - 1
+        print("  Please enter a number from the list.")
+
+
+def _parse_selection(raw: str, n: int) -> list[int]:
+    """'1,3,5-8' -> [0,2,4,5,6,7]; '' / 'all' -> everything. Out-of-range ignored."""
+    raw = raw.strip().lower()
+    if not raw or raw == "all":
+        return list(range(n))
+    picked: set[int] = set()
+    for part in raw.replace(" ", "").split(","):
+        if "-" in part:
+            a, _, b = part.partition("-")
+            if a.isdigit() and b.isdigit():
+                picked.update(k - 1 for k in range(int(a), int(b) + 1) if 1 <= k <= n)
+        elif part.isdigit() and 1 <= int(part) <= n:
+            picked.add(int(part) - 1)
+    return sorted(picked)
+
+
+def _select_projects(found: list[Path]) -> list[Path]:
+    print(f"\nFound {len(found)} project(s):")
+    for i, p in enumerate(found, 1):
+        print(f"  {i:2}. {p.name}   ({p})")
+    if not _interactive():
+        return found
+    idx = _parse_selection(_ask("Select (e.g. 1,3,5-8 · Enter = all)", "all"), len(found))
+    return [found[i] for i in idx] or found
+
+
+def interactive_wizard(args) -> bool:
+    """Guided terminal flow → populates args (projects/probe/repeat/tier/yes). Returns True to
+    proceed with a run, False to exit without spending anything (the gate stays sacred)."""
+    print("\nscoperoute — which of your projects can you actually build with Claude Fable 5?\n"
+          "Fable 5 is free on Claude Code only until July 7; let's find where that free window "
+          "really lands before you burn it.\n")
+
+    scope = _choose("What should I scan?",
+                    ["This directory and below (.)", "Another path…", "Specific project folders…"], 0)
+    if scope == 2:
+        raw = _ask("Project folders (space-separated paths)", "")
+        sel = [Path(p).expanduser() for p in raw.split()]
+    else:
+        root = (Path.cwd() if scope == 0
+                else Path(_ask("Path to scan for git repos", str(Path.home() / "dev"))).expanduser())
+        found = find_projects(root) if root.is_dir() else []
+        sel = _select_projects(found) if found else []
+
+    sel = sorted({p.resolve() for p in sel if p.is_dir()})
+    if not sel:
+        print("No projects found — nothing to do.")
+        return False
+    args.projects, args.root = sel, None
+
+    args.probe = ["code", "arch", "summary"][_choose(
+        "\nProbe mode",
+        ["code — inject real code, highest fidelity (default)",
+         "arch — prose summary only, cheaper",
+         "summary — legacy bare/full probe"], 0)]
+    try:
+        args.repeat = max(1, int(_ask("Repeats per component (majority vote)", "1")))
+    except ValueError:
+        args.repeat = 1
+
+    print("\n" + "─" * 64)
+    ests = E.summarize(sel, args.repeat, args.probe)
+    E.print_report(ests, args.repeat)
+    import subscription as SUB
+    snap = None if args.no_codexbar else SUB.snapshot()
+    if not args.tier and not (snap and snap.get("tier")):
+        args.tier = ["pro", "max5", "max20", "team", None][_choose(
+            "\nWhich Claude plan (for the % of plan)?",
+            ["Pro (~$20)", "Max 5× (~$100)", "Max 20× (~$200)", "Team (~$30/seat)", "skip"], 4)]
+    print(SUB.format_block(ests, args.tier, args.plan_usd, snap))
+    print("─" * 64)
+
+    if not _confirm(f"\nSpend Fable and probe these {len(sel)} project(s) now?", default=False):
+        print("Nothing run — Fable quota untouched. Re-run `scoperoute` any time.")
+        return False
+    args.yes = True
+    return True
+
+
 # ---------------------------------------------------------------- main
 
 def main():
     ap = argparse.ArgumentParser(description="Triage projects for Claude Fable 5.")
-    g = ap.add_mutually_exclusive_group(required=True)
+    g = ap.add_mutually_exclusive_group(required=False)   # empty -> interactive wizard (TTY) / help
     g.add_argument("--root", type=Path, help="Root to search for git repositories.")
     g.add_argument("--projects", type=Path, nargs="+", help="Explicit project paths.")
+    ap.add_argument("--interactive", "-i", action="store_true",
+                    help="Force the guided terminal wizard (also the default with no --root/--projects).")
     ap.add_argument("--out", type=Path, default=Path("scoperoute_report"),
                     help="Base name; writes .csv (+ .jsonl source of truth).")
     ap.add_argument("--max-context-chars", type=int, default=None,
@@ -925,7 +1056,7 @@ def main():
                     help="Predict Fable-safety with Opus instead of probing Fable (spends the Opus/Weekly "
                          "window, NOT Fable) — triage many repos cheaply, then Fable-probe only the flagged.")
     ap.add_argument("--tier", choices=["pro", "max5", "max20", "team"], default=None,
-                    help="Claude plan for the $/% math (else CodexBar detects it, else asked).")
+                    help="Claude plan for the cost-vs-plan math (else CodexBar detects it, else asked).")
     ap.add_argument("--plan-usd", type=float, default=None, help="Override the plan's monthly USD.")
     ap.add_argument("--no-codexbar", action="store_true",
                     help="Don't call CodexBar for real tier/usage/spend.")
@@ -951,6 +1082,14 @@ def main():
     ap.add_argument("--cli-arg", action="append", default=[],
                     help="Extra flag passed through to `claude -p` (repeatable).")
     args = ap.parse_args()
+
+    # No scope given → guided wizard in a real terminal; never hang when headless/piped.
+    if args.interactive or (not args.root and not args.projects):
+        if not _interactive() and not args.interactive:
+            sys.exit("Pick a scope: run `scoperoute` in a terminal for the guided wizard, or pass "
+                     "--root PATH / --projects P… (see --help).")
+        if not interactive_wizard(args):     # sets projects/probe/repeat/tier/yes, or declines
+            return
 
     if args.probe is None:                   # default: code, but summary under --api
         args.probe = "summary" if args.api else "code"

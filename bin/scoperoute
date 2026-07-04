@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# scoperoute — thin launcher for the stdlib CLI (no deps). A bare `scoperoute` opens the
+# interactive wizard; `scoperoute --help` shows the flags. install.sh symlinks this onto
+# ~/.local/bin, so resolve BASH_SOURCE through symlinks to find the repo root.
+set -euo pipefail
+
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" >/dev/null 2>&1 && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$dir/$src" ;; esac      # resolve a relative symlink
+done
+ROOT="$(cd -P "$(dirname "$src")/.." >/dev/null 2>&1 && pwd)"
+
+exec python3 "$ROOT/skills/scoperoute/scripts/scoperoute.py" "$@"

@@ -903,10 +903,11 @@ def main():
                     default="low",
                     help="Effort for the Fable probe (default: low — the classifier fires regardless of "
                          "effort, so low is enough for any probe and cheapest on Fable quota).")
-    ap.add_argument("--probe", choices=["summary", "arch"], default=None,
-                    help="arch (default) = no-trim distillation (Sonnet recon -> Opus summary -> "
-                         "Fable 'improve architecture') with per-component verdicts, CLI only. "
-                         "summary = cheap benign-summarize probe (bare/full; the default under --api).")
+    ap.add_argument("--probe", choices=["summary", "arch", "code"], default=None,
+                    help="code (default) = highest fidelity: Sonnet recon -> Opus summary + Opus-curated "
+                         "REAL code -> Fable, so guardrails see concrete implementations, not just prose. "
+                         "arch = the cheaper prose-only screen (no code). Both are CLI-only, per-component. "
+                         "summary = legacy benign-summarize probe (bare/full; the default under --api).")
     ap.add_argument("--evaluate", action="store_true",
                     help="Predict Fable-safety with Opus instead of probing Fable (spends the Opus/Weekly "
                          "window, NOT Fable) — triage many repos cheaply, then Fable-probe only the flagged.")
@@ -935,15 +936,15 @@ def main():
                     help="Extra flag passed through to `claude -p` (repeatable).")
     args = ap.parse_args()
 
-    if args.probe is None:                   # default: arch, but summary under --api
-        args.probe = "summary" if args.api else "arch"
+    if args.probe is None:                   # default: code, but summary under --api
+        args.probe = "summary" if args.api else "code"
 
     if args.batch and not args.api:
         sys.exit("--batch requires --api.")
-    if args.probe == "arch" and args.api:
-        sys.exit("--probe arch is CLI-only (agentic recon); drop --api.")
-    if args.probe == "arch" and args.batch:
-        sys.exit("--probe arch does not support --batch.")
+    if args.probe in ("arch", "code") and args.api:
+        sys.exit(f"--probe {args.probe} is CLI-only (agentic recon); drop --api.")
+    if args.probe in ("arch", "code") and args.batch:
+        sys.exit(f"--probe {args.probe} does not support --batch.")
 
     projects = find_projects(args.root) if args.root else args.projects
     projects = sorted({p.resolve() for p in projects if p.is_dir()})
@@ -951,7 +952,7 @@ def main():
         sys.exit("No projects found.")
 
     if args.estimate:                       # calculator-only mode — no probes
-        ests = E.summarize(projects, args.repeat)
+        ests = E.summarize(projects, args.repeat, args.probe)
         E.print_report(ests, args.repeat)
         import subscription as SUB
         snap = None if args.no_codexbar else SUB.snapshot()
@@ -988,7 +989,8 @@ def main():
                 for w in snap.get("windows", []):
                     print(f"    current usage — {w['window']}: {w['used_percent']}% used")
         else:
-            print(SUB.format_block(E.summarize(todo, args.repeat), args.tier, args.plan_usd, snap))
+            print(SUB.format_block(E.summarize(todo, args.repeat, args.probe),
+                                   args.tier, args.plan_usd, snap))
         tail = "Opus window untouched" if args.evaluate else "Fable quota untouched"
         print(f"\nNothing was run — {tail}. Re-run with --yes to proceed"
               + ("." if args.evaluate else ", or --estimate for the full per-part breakdown."))

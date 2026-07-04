@@ -47,6 +47,8 @@ RECON_OUT_BASE = 800        # Sonnet recon output: inventory + per-component not
 RECON_OUT_PER_COMPONENT = 200
 SUMMARY_OUT_PER_COMPONENT = 1000   # Opus arch.md per component
 ARCH_TOKENS = 1200          # distilled arch.md handed to Fable/controls per component
+CODE_EXCERPT_TOKENS = 1500  # Opus-curated real code added to the Fable payload (--probe code)
+CURATE_INPUT_CAP = 190_000  # tokens of source Opus reads while curating (bounded curation input)
 PROBE_OUT = 500             # improve-architecture reply (or refusal)
 
 IGNORE_DIRS = {
@@ -156,7 +158,7 @@ class Estimate:
     stages: list            # list[StageCost] — the tokens/$/part breakdown
 
 
-def estimate_project(project: Path, repeat: int = 1) -> Estimate:
+def estimate_project(project: Path, repeat: int = 1, mode: str = "code") -> Estimate:
     comps = detect_components(project)
     n = len(comps)
     proj_bytes, proj_files = code_bytes(project)
@@ -177,16 +179,26 @@ def estimate_project(project: Path, repeat: int = 1) -> Estimate:
     stages.append(StageCost("summary", M.SUMMARY_MODEL.id, sum_in, sum_out, 1,
                             _cost(M.SUMMARY_MODEL.id, sum_in, sum_out), "always"))
 
+    # Stage 2b — curate (Opus, --probe code only): reads real source (bounded) and
+    # returns the high-signal code excerpt per component that gets added to the probe.
+    payload_in = ARCH_TOKENS
+    if mode == "code":
+        curate_in = min(proj_tok, CURATE_INPUT_CAP)
+        curate_out = CODE_EXCERPT_TOKENS * n
+        stages.append(StageCost("curate", M.SUMMARY_MODEL.id, curate_in, curate_out, 1,
+                                _cost(M.SUMMARY_MODEL.id, curate_in, curate_out), "always"))
+        payload_in = ARCH_TOKENS + CODE_EXCERPT_TOKENS      # Fable sees arch + real code
+
     # Stage 3 — probe (Fable): each component, repeated N times.
     probe_calls = n * repeat
     stages.append(StageCost("probe", M.PROBE_MODEL.id,
-                            ARCH_TOKENS * probe_calls, PROBE_OUT * probe_calls, probe_calls,
-                            _cost(M.PROBE_MODEL.id, ARCH_TOKENS, PROBE_OUT, probe_calls), "always"))
+                            payload_in * probe_calls, PROBE_OUT * probe_calls, probe_calls,
+                            _cost(M.PROBE_MODEL.id, payload_in, PROBE_OUT, probe_calls), "always"))
 
     # Stage 4 — controls (Opus + Sonnet), only on components that trip (max = all n).
     for mdl, _eff in M.CONTROLS:
-        stages.append(StageCost("controls", mdl.id, ARCH_TOKENS * n, PROBE_OUT * n, n,
-                                _cost(mdl.id, ARCH_TOKENS, PROBE_OUT, n), "if_tripped"))
+        stages.append(StageCost("controls", mdl.id, payload_in * n, PROBE_OUT * n, n,
+                                _cost(mdl.id, payload_in, PROBE_OUT, n), "if_tripped"))
 
     usd_min = round(sum(s.usd for s in stages if s.when == "always"), 3)
     usd_max = round(sum(s.usd for s in stages), 3)
@@ -197,8 +209,8 @@ def estimate_project(project: Path, repeat: int = 1) -> Estimate:
                     calls_min, calls_max, usd_min, usd_max, stages)
 
 
-def summarize(projects: list[Path], repeat: int = 1) -> list[Estimate]:
-    return [estimate_project(p, repeat) for p in projects if p.is_dir()]
+def summarize(projects: list[Path], repeat: int = 1, mode: str = "code") -> list[Estimate]:
+    return [estimate_project(p, repeat, mode) for p in projects if p.is_dir()]
 
 
 def print_report(ests: list[Estimate], repeat: int) -> None:
@@ -243,7 +255,7 @@ def print_report(ests: list[Estimate], repeat: int) -> None:
             if s.when == "always":
                 m["usd_min"] += s.usd
     print("\nBy stage (tokens / $ per part):")
-    for stage in ("recon", "summary", "probe", "controls"):
+    for stage in ("recon", "summary", "curate", "probe", "controls"):
         if stage in stage_agg:
             a = stage_agg[stage]
             tag = "" if a["when"] == "always" else "   ← only components that trip"
@@ -280,13 +292,16 @@ def main():
     g.add_argument("--root", type=Path, help="Estimate every git repo under here.")
     g.add_argument("--projects", type=Path, nargs="+", help="Estimate these paths.")
     ap.add_argument("--repeat", type=int, default=1, help="Probe repeats per component (majority vote).")
+    ap.add_argument("--probe", choices=["summary", "arch", "code"], default="code",
+                    help="Which pipeline to price: code (default, +Opus curate +real code in the "
+                         "Fable payload), arch (prose only), or summary (legacy).")
     ap.add_argument("--tier", choices=["pro", "max5", "max20", "team"], default=None,
                     help="Claude plan for the $/% math (else CodexBar detects it).")
     ap.add_argument("--plan-usd", type=float, default=None, help="Override the plan's monthly USD.")
     ap.add_argument("--no-codexbar", action="store_true", help="Don't call CodexBar for real tier/usage.")
     args = ap.parse_args()
     projects = _find_projects(args.root) if args.root else list(args.projects)
-    ests = summarize(projects, args.repeat)
+    ests = summarize(projects, args.repeat, args.probe)
     print_report(ests, args.repeat)
     try:
         import subscription as SUB

@@ -60,18 +60,26 @@ crispr-notes       code_sensitive      Genuinely sensitive. Opus, with care.
 
 ## How it works
 
-The default mode is **`arch` — no trimming**. Instead of truncating your code to a byte budget (an
-anti-pattern that judges a mutilated fragment), it distills:
+The default mode is **`code` — no trimming**. Instead of truncating your code to a byte budget (an
+anti-pattern that judges a mutilated fragment), it distills, then probes on the *real* implementation:
 
 1. **Recon** — Sonnet 5 reads the project's files *itself* and inventories its components.
 2. **Summary** — Opus 4.8 writes a clean architecture summary per component.
-3. **Probe** — Fable 5 is asked to *improve the architecture* of each component; a refusal (or a silent
-   Opus fallback) means it won't cooperate there.
-4. **Rollup** — per-component verdicts become a project verdict, naming what to keep off Fable.
+3. **Curate** — Opus 4.8 selects the **real code** that carries the most signal — whole functions, not a
+   byte slice — because a guardrail can wave through a benign-sounding *description* yet fire on the actual
+   implementation (a library, a syscall, a pattern). This is what Fable sees when you build.
+4. **Probe** — Fable 5 is asked to *improve* each component (summary **+ real code**); a refusal (or a
+   silent Opus fallback) means it won't cooperate there.
+5. **Rollup** — per-component verdicts become a project verdict, naming what to keep off Fable.
 
-If Fable refuses, the same task runs through **Opus 4.8 + Sonnet 5** controls: both answer → Fable
+If Fable refuses, the same payload runs through **Opus 4.8 + Sonnet 5** controls: both answer → Fable
 over-triggered (benign, use Opus); every model refuses → genuinely sensitive. `--repeat N` turns a
-borderline coin-flip into a trip fraction. A cheaper `--probe summary` mode is available for a fast pass.
+borderline coin-flip into a trip fraction. Prefer a cheaper pass? `--probe arch` is prose-only (no code);
+`--probe summary` is the fast legacy probe.
+
+**Your spent quota becomes an artifact.** After a run, scoperoute writes each probed repo a
+`_fable/fable-architecture-review.md` — Fable's own review of each component, recovered from the run's
+transcripts. The triage pays for itself in a preliminary review. (Opt out with `--no-fable-docs`.)
 
 Details: [`interpreting-results.md`](skills/scoperoute/references/interpreting-results.md) ·
 [`how-it-works.md`](skills/scoperoute/references/how-it-works.md).

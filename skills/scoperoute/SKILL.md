@@ -2,12 +2,14 @@
 name: scoperoute
 description: >
   Decide which local git projects to build with Claude Fable 5 vs keep on Opus 4.8, and what it costs.
-  Distills each repo (Sonnet 5 recon → Opus 4.8 summary), probes Fable 5 per component with an "improve
-  the architecture" task, and reports per-component verdicts. Also estimates the run's tokens/$ per part
-  and — via CodexBar — as a % of the user's Claude plan (Pro/Max/Team), and says what to run first.
-  Use when the user asks which projects to point Fable at, says Fable keeps refusing / falling back to
-  Opus, asks "what should I build with free Fable", or wants a cost/subscription estimate for a triage.
-  Read-only and benign; detects and routes, never bypasses the classifier. By HubLab.ai.
+  Distills each repo (Sonnet 5 recon → Opus 4.8 summary + Opus-curated REAL code) and probes Fable 5 per
+  component with an "improve this code" task, so guardrails are tested on the actual implementation, not
+  just prose. Reports per-component verdicts and, by default, writes each probed repo a Fable review under
+  _fable/. Also estimates the run's tokens/$ per part and — via CodexBar — as a % of the user's Claude
+  plan (Pro/Max/Team), and says what to run first. Use when the user asks which projects to point Fable
+  at, says Fable keeps refusing / falling back to Opus, asks "what should I build with free Fable", or
+  wants a cost/subscription estimate for a triage. Read-only and benign; detects and routes, never
+  bypasses the classifier. By HubLab.ai.
 version: 0.2.0
 license: MIT
 user-invocable: true
@@ -25,8 +27,8 @@ routes; for a genuinely sensitive project the answer is Opus, never coaxing Fabl
 
 ## The flow (follow this order)
 
-1. **Estimate first — always.** The default `arch` mode reads whole codebases, so show the cost before
-   running:
+1. **Estimate first — always.** The default `code` mode distills each repo *and* injects Opus-curated
+   real code into the Fable probe (higher fidelity, a bit more Fable spend), so show the cost first:
    ```bash
    python "$SR" --root <path> --repeat 3 --estimate
    ```
@@ -47,7 +49,8 @@ routes; for a genuinely sensitive project the answer is Opus, never coaxing Fabl
    user, get their explicit OK on the projects and spend, then add `--yes`:
    ```bash
    python "$SR" --root <path> --repeat 3                    # lists projects + cost, STOPS (no Fable)
-   python "$SR" --root <path> --repeat 3 --jobs 4 --yes     # runs it (arch default), after approval
+   python "$SR" --root <path> --repeat 3 --jobs 4 --yes     # runs it (code default), after approval
+   python "$SR" --root <path> --probe arch --yes            # cheaper prose-only screen (no code injected)
    python "$SR" --projects <a> <b> --yes                    # a quick, approved subset
    ```
    Fable quota is the scarce resource (a 16-project × repeat-3 sweep can use ~a third of the weekly Fable
@@ -56,6 +59,12 @@ routes; for a genuinely sensitive project the answer is Opus, never coaxing Fabl
 
 5. **Read results.** Present each project's **verdict** and **recommendation** (never the raw category),
    including the per-component breakdown. Point to `references/interpreting-results.md`.
+
+6. **Fable-review docs (automatic).** After a `code`/`arch` run, scoperoute writes each probed repo a
+   `<repo>/_fable/fable-architecture-review.md` — Fable's own review of each component, recovered from the
+   run's transcripts, so the quota you spent leaves a durable answer. Mention where they landed; opt out
+   with `--no-fable-docs`. These contain review prose (and, in `code` mode, the reviewed design) — keep
+   them local unless the user wants them shared.
 
 ## Reading the verdicts
 

@@ -640,7 +640,7 @@ def triage_project(backend, project: Path, args) -> dict:
     rep = getattr(args, "repeat", 1)
     bare_ctx = collect_context(project, False, args.max_context_chars)
     full_ctx = collect_context(project, True, args.max_context_chars)
-    eff = getattr(args, "fable_effort", "medium")
+    eff = getattr(args, "fable_effort", "low")
     bare = repeat_probe(backend, FABLE_MODEL, bare_ctx, eff, rep)
     full = repeat_probe(backend, FABLE_MODEL, full_ctx, eff, rep)
     fv = classify_fable(bare, full)
@@ -913,9 +913,9 @@ def main():
     ap.add_argument("--repeat", type=int, default=1,
                     help="Probe repeats per unit for a majority vote (also drives --estimate).")
     ap.add_argument("--fable-effort", choices=["low", "medium", "high", "xhigh", "max"],
-                    default="medium",
-                    help="Effort for the Fable probe (default: medium — the probe only needs the "
-                         "refusal signal, not deep reasoning; lower effort = far less Fable quota).")
+                    default="low",
+                    help="Effort for the Fable probe (default: low — the classifier fires regardless of "
+                         "effort, so low is enough for any probe and cheapest on Fable quota).")
     ap.add_argument("--probe", choices=["summary", "arch"], default=None,
                     help="arch (default) = no-trim distillation (Sonnet recon -> Opus summary -> "
                          "Fable 'improve architecture') with per-component verdicts, CLI only. "

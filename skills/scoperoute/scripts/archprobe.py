@@ -103,7 +103,7 @@ def triage_arch(backend, project: Path, args) -> dict:
                           "calibration": "n/a", "category": None, "error": "empty_arch"})
             continue
         payload = IMPROVE.format(arch=arch_md)
-        fb = S.repeat_probe(backend, S.FABLE_MODEL, payload, getattr(args, "fable_effort", "medium"),
+        fb = S.repeat_probe(backend, S.FABLE_MODEL, payload, getattr(args, "fable_effort", "low"),
                             rep, text=True)
 
         controls: dict[str, S.ProbeResult] = {}

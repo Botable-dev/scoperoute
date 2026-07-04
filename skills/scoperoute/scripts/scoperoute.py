@@ -67,6 +67,33 @@ ADJUDICATOR_MODEL = M.ADJUDICATOR.id
 VERSION = "0.3.0"        # real-code probe (--probe code) + default fable-docs stage
 SCHEMA_VERSION = 2       # bump when a JSONL record's shape changes (rec #4)
 
+# Console mark colors, aligned to Anthropic's model coding (Fable = orange, Opus = green).
+# Colored by VERDICT (not by the label text, so labels can change freely) and only on a
+# TTY — piped output stays plain text so the CSV/parsers see no escape codes.
+_FABLE_ORANGE = "\033[38;2;239;122;69m"
+_OPUS_GREEN = "\033[38;2;47;190;133m"
+_ANSI_RESET = "\033[0m"
+_FABLE_VERDICTS = {"fable_friendly", "predicted_safe", "config_overtrigger"}
+_OPUS_VERDICTS = {"config_sensitive", "code_overtrigger", "code_sensitive", "predicted_risky"}
+
+
+def mark_tag(verdict: str) -> str:
+    """The fixed-width console mark for a verdict ([Fable]/[Opus]/[Review]/…), colored by
+    model convention on a TTY: Fable = orange, Opus = green. Unknown verdicts show their
+    own name — never a cryptic symbol."""
+    tag = MARK.get(verdict, verdict[:6].ljust(6))
+    if not sys.stdout.isatty():
+        return tag
+    if verdict in _FABLE_VERDICTS:
+        c = _FABLE_ORANGE
+    elif verdict in _OPUS_VERDICTS:
+        c = _OPUS_GREEN
+    elif verdict == "error":
+        c = "\033[31m"
+    else:
+        c = "\033[90m"          # ambiguous / incomplete / unconfirmed
+    return f"{c}{tag}{_ANSI_RESET}"
+
 # Benign, non-security instruction: any refusal is attributable to the CONTEXT,
 # not the request. (Verbatim from the v0 engine — satisfies FR1.)
 BENIGN_INSTRUCTION = (
@@ -789,7 +816,7 @@ def run_batch(client_backend, projects, args, jsonl_path, done) -> list[dict]:
         stamp_row(row, run_meta)
         _append_jsonl(jsonl_path, row)
         records.append(row)
-        print(f"  [{MARK.get(verdict, '?  ')}] {p.name:<34} {verdict}")
+        print(f"  [{mark_tag(verdict)}] {p.name:<34} {verdict}")
     return records
 
 
@@ -862,7 +889,7 @@ def _append_jsonl(path: Path, record: dict) -> None:
 
 def _emit(project: Path, verdict: str) -> None:
     with _LOCK:
-        print(f"  [{MARK.get(verdict, '?  ')}] {project.name:<34} {verdict}")
+        print(f"  [{mark_tag(verdict)}] {project.name:<34} {verdict}")
 
 
 def run_live(backend, projects, args, jsonl_path) -> list[dict]:

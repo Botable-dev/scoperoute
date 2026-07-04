@@ -111,9 +111,12 @@ RECOMMENDATIONS = {
         "confirm `claude` is logged in and the model id is available.",
 }
 
-# verdict -> 3-char console tag.
-MARK = {"fable_friendly": "OK ", "config_overtrigger": "FIX", "config_sensitive": "OPU",
-        "config_ambiguous": "?  ", "code_overtrigger": "OPU", "code_sensitive": "OPU",
-        "code_ambiguous": "?  ", "config_triggered": "?  ", "code_triggered": "?  ",
-        "incomplete": "INC", "predicted_safe": "OK ", "predicted_risky": "OPU",
-        "predicted_review": "?  ", "error": "ERR"}
+# verdict -> console tag: an explicit word (no cryptic ?/INC/FIX), padded to a fixed 6-char
+# width for column alignment. The word names the action: Fable (build on Fable) / Opus
+# (route to Opus) / Reword (rework CLAUDE.md wording) / Review (controls split — look closer)
+# / Re-run (unconfirmed or capped — re-probe) / Error. Colored by scoperoute.mark_tag.
+MARK = {"fable_friendly": "Fable ", "config_overtrigger": "Reword", "config_sensitive": "Opus  ",
+        "config_ambiguous": "Review", "code_overtrigger": "Opus  ", "code_sensitive": "Opus  ",
+        "code_ambiguous": "Review", "config_triggered": "Re-run", "code_triggered": "Re-run",
+        "incomplete": "Re-run", "predicted_safe": "Fable ", "predicted_risky": "Opus  ",
+        "predicted_review": "Review", "error": "Error "}

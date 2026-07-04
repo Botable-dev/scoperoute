@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="96" alt="scoperoute — scope your repo, route it to Fable or Opus"></p>
+
 # scoperoute
 
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-EF7A45)](https://github.com/botable-dev/scoperoute)

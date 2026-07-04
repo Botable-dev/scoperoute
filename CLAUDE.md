@@ -43,9 +43,19 @@ skills/scoperoute/
   scripts/fable_watch.py                          # Phase 2 live fallback monitor
   scripts/transcript.py                           # shared metadata-only transcript reader
   references/{interpreting-results, how-it-works, claude-session-sync-README}.md
-tests/                                            # deterministic, no model calls (verdicts/fr4/codeprobe/fabledocs/faillloud)
+bin/scoperoute                                    # symlink-safe launcher (bare run = interactive wizard)
+install.sh                                         # one-click: ~/.local/bin/scoperoute + ~/.claude/skills/scoperoute (bare /scoperoute); --uninstall
+tests/                                            # deterministic, no model calls (verdicts/fr4/codeprobe/fabledocs/faillloud/interactive)
 PRD_scoperoute.md · README.md · LICENSE · .gitignore
 ```
+
+**Install / run.** `./install.sh` sets up BOTH a `scoperoute` terminal command (`bin/scoperoute` symlinked
+to `~/.local/bin`) and a bare `/scoperoute` Claude Code **personal skill** (`~/.claude/skills/scoperoute`);
+the marketplace plugin stays for public `claude plugin install` (namespaced `/scoperoute:scoperoute`). A
+bare `scoperoute` in a real terminal runs the **interactive wizard** (scope → picker → mode/repeat →
+estimate + tier → gate → run); everything is TTY-guarded (`_interactive`/`_confirm`/`_choose`/`_ask`,
+EOFError→default) so headless / piped / inside-Claude-Code runs never prompt and never hang — the flag
+path + `AskUserQuestion` are the non-terminal faces. `interactive_wizard()` never auto-approves the gate.
 
 ## Run / setup
 

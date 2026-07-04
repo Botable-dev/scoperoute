@@ -205,6 +205,22 @@ def read_refusal(msg) -> tuple[bool, str | None]:
     return True, (getattr(details, "category", None) if details else None)
 
 
+def judge_turn(turn, want) -> tuple[bool | None, str | None, str | None]:
+    """Read a CLI probe's outcome off its pinned transcript turn -> (tripped, category, error).
+
+    Fail-loud (Fable rec #3): a non-refusal turn whose served model we CANNOT identify is
+    reported as an error, never as clean. A silent parse miss (e.g. a Claude Code transcript
+    format drift that drops .message.model) would otherwise read as a clean Fable pass and
+    invert the whole tool. `want` = the model_family we launched (e.g. claude-fable-5)."""
+    if turn.refusal:                              # explicit refusal turn (served is <synthetic>)
+        return True, turn.category, None
+    if turn.family is None:                       # served model missing / unrecognized shape
+        return None, None, "unrecognized_served_model"
+    if want is not None and turn.family != want:  # served by another family -> masked fallback
+        return True, None, None
+    return False, None, None                      # positively served by the model we asked for
+
+
 # ---------------------------------------------------------------- backends
 
 class CLIBackend:
@@ -267,14 +283,11 @@ class CLIBackend:
             hint = _cli_error_hint(proc)
             return ProbeResult(model, None, None, None, hint or "no_transcript_turn")
 
-        want = T.model_family(model)
-        if turn.refusal:                          # explicit refusal turn (model is <synthetic>)
-            return ProbeResult(model, True, turn.category, turn.served_model, None)
-        # No refusal turn, but served by a different family => CC masked the refusal
-        # with a built-in fallback. Served-model divergence IS the trip signal.
-        if turn.family is not None and want is not None and turn.family != want:
-            return ProbeResult(model, True, None, turn.served_model, None)
-        return ProbeResult(model, False, None, turn.served_model, None)
+        # Fail-loud verdict off the transcript turn: a refusal, a masked-fallback
+        # divergence, a positive clean pass, or — on an unidentifiable served model —
+        # an error (never a silent clean). See judge_turn (Fable rec #3).
+        tripped, category, err = judge_turn(turn, T.model_family(model))
+        return ProbeResult(model, tripped, category, turn.served_model, err)
 
     def probe(self, model, context, effort=None) -> ProbeResult:
         return self.probe_text(model, context + "\n\n---\n" + BENIGN_INSTRUCTION, effort)

@@ -22,18 +22,18 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import models as M  # noqa: E402  — the one declarative model/pricing table (rec #6)
+
 # ---- knobs (transparent so you can tune them) ----
 
-# Notional list price, USD per 1M tokens (input, output). As of 2026-06-24.
-PRICING = {
-    "claude-fable-5":  (10.0, 50.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-sonnet-5": (2.0, 10.0),   # intro pricing through 2026-08-31 (else 3.0/15.0)
-    "claude-haiku-4-5": (1.0, 5.0),
-}
+# Notional list price, USD per 1M tokens (input, output). Single source of truth in
+# models.py so the estimator can never drift from the ids/prices the engine runs.
+PRICING = M.PRICING
 CHARS_PER_TOKEN = 3.2       # rough for source code (denser than the ~4.0 of prose)
 RECON_OVERHEAD = 1.5        # agentic recon re-reads files / adds tool+thinking tokens
 # These are ESTIMATION-ONLY heuristics — they model how much the agentic recon is
@@ -169,24 +169,24 @@ def estimate_project(project: Path, repeat: int = 1) -> Estimate:
     # doesn't mean a giant bill.
     recon_in = min(int(proj_tok * RECON_OVERHEAD), RECON_INPUT_CAP)
     recon_out = RECON_OUT_BASE + RECON_OUT_PER_COMPONENT * n
-    stages.append(StageCost("recon", "claude-sonnet-5", recon_in, recon_out, 1,
-                            _cost("claude-sonnet-5", recon_in, recon_out), "always"))
+    stages.append(StageCost("recon", M.RECON_MODEL.id, recon_in, recon_out, 1,
+                            _cost(M.RECON_MODEL.id, recon_in, recon_out), "always"))
 
     # Stage 2 — summary (Opus): recon notes -> per-component arch.md (one call).
     sum_in, sum_out = recon_out + 500, SUMMARY_OUT_PER_COMPONENT * n
-    stages.append(StageCost("summary", "claude-opus-4-8", sum_in, sum_out, 1,
-                            _cost("claude-opus-4-8", sum_in, sum_out), "always"))
+    stages.append(StageCost("summary", M.SUMMARY_MODEL.id, sum_in, sum_out, 1,
+                            _cost(M.SUMMARY_MODEL.id, sum_in, sum_out), "always"))
 
     # Stage 3 — probe (Fable): each component, repeated N times.
     probe_calls = n * repeat
-    stages.append(StageCost("probe", "claude-fable-5",
+    stages.append(StageCost("probe", M.PROBE_MODEL.id,
                             ARCH_TOKENS * probe_calls, PROBE_OUT * probe_calls, probe_calls,
-                            _cost("claude-fable-5", ARCH_TOKENS, PROBE_OUT, probe_calls), "always"))
+                            _cost(M.PROBE_MODEL.id, ARCH_TOKENS, PROBE_OUT, probe_calls), "always"))
 
     # Stage 4 — controls (Opus + Sonnet), only on components that trip (max = all n).
-    for m in ("claude-opus-4-8", "claude-sonnet-5"):
-        stages.append(StageCost("controls", m, ARCH_TOKENS * n, PROBE_OUT * n, n,
-                                _cost(m, ARCH_TOKENS, PROBE_OUT, n), "if_tripped"))
+    for mdl, _eff in M.CONTROLS:
+        stages.append(StageCost("controls", mdl.id, ARCH_TOKENS * n, PROBE_OUT * n, n,
+                                _cost(mdl.id, ARCH_TOKENS, PROBE_OUT, n), "if_tripped"))
 
     usd_min = round(sum(s.usd for s in stages if s.when == "always"), 3)
     usd_max = round(sum(s.usd for s in stages), 3)

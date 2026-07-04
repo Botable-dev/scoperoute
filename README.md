@@ -1,35 +1,55 @@
 # scoperoute
 
-**Which of your projects can you actually build with Claude Fable 5?**
+> **⏳ Claude Fable 5 is free on Claude Code only until July 7 — after that, API pricing ($10 / $50 per M).**
+> Find out where your free window actually lands *before* you burn it.
 
-Fable 5 is the strongest model, and free through the current Claude Code window. But its safety classifier
-reads the *context* of your request — your `CLAUDE.md`, the file tree, the code — and quietly refuses
-benign work on some projects, falling back to Opus. "Use Fable everywhere" wastes the window on repos
-where it keeps bailing. scoperoute tells you, **per project and per component**, where Fable will
-cooperate — and what the run will cost, in tokens, dollars, and a slice of your Claude plan.
+**Which of your repos can you actually build with Claude Fable 5 — and is Fable even answering you?**
 
-It isn't another code reviewer — Claude Code already ships `/code-review` and `/security-review` for
-finding bugs and vulnerabilities; scoperoute answers the question that comes *before* you build: which
-model each repo should run on, and what that costs.
+![scoperoute — per-component verdicts and the run cost, before you spend anything](docs/hero.png)
 
-## Try it in one paste
+Fable 5's safety classifier reads the *context* of your request — your `CLAUDE.md`, the file tree, the
+**real code** — and quietly **falls back to Opus** on repos it doesn't like. You can spend your free week
+on the best model and never actually get it. scoperoute probes Fable **per component** (on your real code,
+not a description), tells you exactly where it cooperates, and prices the run — tokens, dollars, and a slice
+of your Claude plan — before you spend anything.
 
-Install the plugin (below), then paste this to Claude Code:
+And the triage pays for itself: every probe leaves a **free Fable architecture review** in each repo's
+`_fable/` — the quota you spend becomes a second opinion on your design.
 
-> install this repo: `github.com/botable/scoperoute` and evaluate the amount of tokens/$/part, ask what my
-> Claude subscription is (Pro/Max/Team) to calculate my spending estimate in $ and % of the subscription,
-> and tell me what to run first.
+It isn't another code reviewer — Claude Code already ships `/code-review` and `/security-review` for finding
+bugs; scoperoute answers the question that comes *before* you build: which model each repo should run on,
+and what it costs.
 
-## Install
+## Install & run in 60 seconds
 
-Two commands — works with just Claude Code, no API key:
+One script sets up **both** the terminal command and the Claude Code skill — stdlib only, no API key:
+
+```bash
+git clone https://github.com/botable/scoperoute && cd scoperoute && ./install.sh
+scoperoute            # guided, gated wizard — nothing spends Fable until you say yes
+```
+
+Prefer the marketplace plugin?
 
 ```bash
 claude plugin marketplace add botable/scoperoute
-claude plugin install scoperoute@hublab
+claude plugin install scoperoute@hublab       # then /reload-plugins → /scoperoute:scoperoute
 ```
 
-Then run `/scoperoute` in Claude Code.
+`install.sh` gives you a bare **`/scoperoute`** in Claude Code (a personal skill) and a **`scoperoute`**
+terminal command; the marketplace plugin gives you **`/scoperoute:scoperoute`**.
+
+### …or have Claude Code install it for you
+
+Paste to Claude Code:
+
+> Clone github.com/botable/scoperoute, run its `./install.sh`, then run `scoperoute --root ~/dev --estimate`
+> and show me the cost. If `/scoperoute` isn't active yet, tell me to run `/reload-plugins` or restart.
+
+…or, to jump straight to a subscription-aware estimate:
+
+> install `github.com/botable/scoperoute`, evaluate the tokens/$ per part, ask my Claude plan
+> (Pro/Max/Team) to compute my spend in $ and % of the plan, and tell me what to run first.
 
 ## What you get
 
@@ -86,10 +106,10 @@ Details: [`interpreting-results.md`](skills/scoperoute/references/interpreting-r
 
 ## Cost, transparently
 
-Because `arch` reads whole codebases, always estimate first:
+Because `code` mode reads whole codebases, always estimate first:
 
 ```bash
-python skills/scoperoute/scripts/scoperoute.py --root ~/dev --repeat 3 --estimate
+scoperoute --root ~/dev --repeat 3 --estimate
 ```
 
 It prices the run per project *and* per part (Sonnet → Opus → Fable), and — via

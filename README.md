@@ -1,5 +1,10 @@
 # scoperoute
 
+[![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-EF7A45)](https://github.com/botable-dev/scoperoute)
+[![GitHub stars](https://img.shields.io/github/stars/botable-dev/scoperoute?color=7FA886)](https://github.com/botable-dev/scoperoute/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-7FA886)](LICENSE)
+[![by HubLab.ai](https://img.shields.io/badge/by-HubLab.ai-2c3e2f)](https://hublab.ai)
+
 > **⏳ Claude Fable 5 is free on Claude Code only until July 7 — after that, API pricing ($10 / $50 per M).**
 > Find out where your free window actually lands *before* you burn it.
 

@@ -11,3 +11,6 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+
+# private session handoff (project names + quota — never publish)
+HANDOFF.md

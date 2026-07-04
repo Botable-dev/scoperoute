@@ -988,10 +988,21 @@ def _parse_selection(raw: str, n: int) -> list[int]:
     return sorted(picked)
 
 
+def _short(p: Path) -> str:
+    """Display a path with $HOME collapsed to ~ (keeps the username out of the output,
+    and reads cleaner). Falls back to the full path when it isn't under home."""
+    try:
+        home = Path.home().resolve()
+        rp = p.resolve()
+        return "~" if rp == home else "~/" + str(rp.relative_to(home))
+    except (ValueError, OSError):
+        return str(p)
+
+
 def _select_projects(found: list[Path]) -> list[Path]:
     print(f"\nFound {len(found)} project(s):")
     for i, p in enumerate(found, 1):
-        print(f"  {i:2}. {p.name}   ({p})")
+        print(f"  {i:2}. {p.name}   ({_short(p)})")
     if not _interactive():
         return found
     idx = _parse_selection(_ask("Select (e.g. 1,3,5-8 · Enter = all)", "all"), len(found))

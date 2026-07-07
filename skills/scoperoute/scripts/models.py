@@ -47,3 +47,33 @@ PRICING = {m.id: (m.price_in, m.price_out) for m in (FABLE, OPUS, SONNET, HAIKU)
 def control_pairs() -> list[tuple[str, str]]:
     """(model_id, effort) list — the legacy CONTROL_MODELS shape used across the engine."""
     return [(m.id, effort) for m, effort in CONTROLS]
+
+
+# ---------------------------------------------------------------- stage graph
+# ONE declarative pipeline stage-graph (arch-review TP3 / Fable rec #5). The estimator
+# prices exactly these stages and the executor stamps them into run metadata — the
+# approval gate's "prices the run first" promise can't silently drift when a stage is
+# added: add it HERE and both sides pick it up (a test asserts they agree).
+
+@dataclass(frozen=True)
+class Stage:
+    name: str
+    model: Model | None    # None = multi-model stage (controls run CONTROLS)
+    when: str              # "always" | "if_tripped"
+    modes: tuple           # probe modes ("summary" | "arch" | "code") this stage runs in
+
+
+STAGES = (
+    Stage("recon",    RECON_MODEL,   "always",     ("arch", "code")),
+    Stage("summary",  SUMMARY_MODEL, "always",     ("arch", "code")),
+    Stage("curate",   SUMMARY_MODEL, "always",     ("code",)),
+    Stage("probe",    PROBE_MODEL,   "always",     ("summary", "arch", "code")),
+    Stage("controls", None,          "if_tripped", ("summary", "arch", "code")),
+)
+
+MODES = ("summary", "arch", "code")
+
+
+def stages_for(mode: str) -> tuple[Stage, ...]:
+    """The declared pipeline for a probe mode, in execution order."""
+    return tuple(s for s in STAGES if mode in s.modes)

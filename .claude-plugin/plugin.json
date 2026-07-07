@@ -1,8 +1,11 @@
 {
   "name": "scoperoute",
-  "description": "Which of your repos can you actually build with Claude Fable 5? Probes Fable per component on your real code (Sonnet recon → Opus summary + curated code), flags the silent Fable→Opus fallback, prices the run as a % of your Claude plan, and leaves a free Fable review in each repo's _fable/.",
-  "version": "0.3.0",
-  "author": { "name": "HubLab.ai", "email": "hello@hublab.ai" },
+  "description": "Which of your repos can you actually build with Claude Fable 5? Probes Fable per component on your real code (Sonnet recon \u2192 Opus summary + curated code), flags the silent Fable\u2192Opus fallback, prices the run as a % of your Claude plan, and leaves a free Fable review in each repo's _fable/.",
+  "version": "0.3.1",
+  "author": {
+    "name": "HubLab.ai",
+    "email": "hello@hublab.ai"
+  },
   "homepage": "https://github.com/botable-dev/scoperoute",
   "license": "MIT"
 }

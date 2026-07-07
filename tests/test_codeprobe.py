@@ -19,8 +19,10 @@ import archprobe as A    # noqa: E402
 
 
 class FakeBackend:
-    """Records every probe payload; returns canned recon/summary/curate. hasattr recon
-    is True so triage_arch takes the CLI path."""
+    """Records every probe payload; returns canned recon/summary/curate. Declares the
+    `recon` capability so triage_arch takes the CLI path (capability check, TP1)."""
+    capabilities = frozenset({"probe", "recon"})
+
     def __init__(self):
         self.payloads = []
 

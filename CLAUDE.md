@@ -26,6 +26,14 @@ context buckets, and the invariants; read it before extending.
   review (`_fable/`): pure `verdicts.py`, one `models.py` table, structural-FR4 `sharable_row`, schema-v2
   run metadata (records the probe workdir), and a fail-loud transcript verdict (`judge_turn`). Tests in
   `tests/` are deterministic (no model calls).
+- **Phase 4 (v0.3.1): arch-review refactor (`ARCH-REVIEW-2026-07-07.md`, closes Fable recs #2/#5).**
+  Backends extracted to `backends.py` behind a `Backend` ABC with declared `capabilities`
+  (`probe/recon/batch/workdir`) — `main()` gates on capabilities, never `args.api` sniffing; the
+  workdir seam is the `Backend.workdir` property (no `_workdir` poking). One declarative stage-graph
+  `models.STAGES`/`stages_for(mode)`: `estimate.py` prices exactly it, `build_run_meta` stamps it,
+  `tests/test_stages.py` asserts they agree; `tests/test_backend_parity.py` is the parity + session-
+  layout canary. `archprobe` imports `backends/estimate/models/verdicts` directly (residual `S.*`:
+  `read_text`/`IGNORE_DIRS`/`adjudicate`).
 
 ## Layout
 
@@ -33,7 +41,8 @@ context buckets, and the invariants; read it before extending.
 .claude-plugin/{plugin.json, marketplace.json}   # plugin + self-hosted marketplace metadata
 skills/scoperoute/
   SKILL.md                                        # user-invocable: true → /scoperoute
-  scripts/scoperoute.py                           # engine + backends + orchestration; --probe code is DEFAULT
+  scripts/scoperoute.py                           # engine + orchestration + wizard; --probe code is DEFAULT
+  scripts/backends.py                             # Backend ABC (capabilities, workdir seam) + CLIBackend/APIBackend + ProbeResult/judge_turn/repeat_probe
   scripts/archprobe.py                            # --probe arch|code: recon->summary(->curate real code)->per-component probe
   scripts/fabledocs.py                            # DEFAULT post-stage: write <repo>/_fable/ review from the run's transcripts
   scripts/verdicts.py                             # pure, model-free verdict core (classify/calibrate/combine + strings)

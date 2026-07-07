@@ -23,7 +23,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import scoperoute as S  # loaded first when imported lazily from S.run — no import cycle at runtime
+# Concrete-module imports (arch-review TP2): the probe/verdict/pricing primitives come
+# straight from their homes, not through the scoperoute god-namespace.
+import backends as B     # noqa: E402  — ProbeResult, repeat_probe, Backend contract
+import estimate as E     # noqa: E402  — is_source_file
+import models as M       # noqa: E402  — model roles/ids
+from verdicts import calibrate, RECOMMENDATIONS  # noqa: E402
+# Residual S.* surface (3 helpers): context read + adjudicator live with orchestration.
+# scoperoute imports archprobe lazily (run loop), so this stays cycle-safe at runtime.
+import scoperoute as S   # noqa: E402  — read_text, IGNORE_DIRS, adjudicate
 
 RECON_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["components"],
@@ -98,7 +106,7 @@ def _gather_component_source(project, rel_path, budget=CURATE_INPUT_BUDGET) -> s
         if any(part in S.IGNORE_DIRS for part in rel.parts):
             continue
         try:
-            if not S.E.is_source_file(f.name, f.stat().st_size):
+            if not E.is_source_file(f.name, f.stat().st_size):
                 continue
         except OSError:
             continue
@@ -134,7 +142,7 @@ def curate_code(backend, project, recon, arch_by_name) -> dict:
         total += len(block)
     if not blocks:
         return {}
-    out = backend.judge(S.M.SUMMARY_MODEL.id, CURATE_PROMPT + "".join(blocks), CODE_SCHEMA, "high")
+    out = backend.judge(M.SUMMARY_MODEL.id, CURATE_PROMPT + "".join(blocks), CODE_SCHEMA, "high")
     code_by_name: dict[str, str] = {}
     if isinstance(out, dict):
         for c in out.get("components", []) or []:
@@ -154,7 +162,7 @@ _PROJ = {
 }
 
 
-def _component_verdict(fb: S.ProbeResult, calibration: str) -> str:
+def _component_verdict(fb: B.ProbeResult, calibration: str) -> str:
     if fb.tripped is None:
         return "comp_error"
     if not fb.tripped:
@@ -167,7 +175,7 @@ def _component_verdict(fb: S.ProbeResult, calibration: str) -> str:
 
 def _error_row(project: Path, err: str) -> dict:
     return {
-        "project": str(project), "verdict": "error", "recommendation": S.RECOMMENDATIONS["error"],
+        "project": str(project), "verdict": "error", "recommendation": RECOMMENDATIONS["error"],
         "mode": "arch", "components": "", "fable_bare_tripped": None, "fable_full_tripped": None,
         "opus_tripped": None, "sonnet_tripped": None, "calibration": "n/a",
         "adjudicator_verdict": None, "adjudicator_score": None, "error": err,
@@ -176,7 +184,7 @@ def _error_row(project: Path, err: str) -> dict:
 
 
 def triage_arch(backend, project: Path, args) -> dict:
-    if not hasattr(backend, "recon"):
+    if "recon" not in getattr(backend, "capabilities", ()):     # capability, not hasattr (TP1)
         return _error_row(project, "arch_requires_cli_backend")
     rep = getattr(args, "repeat", 1)
 
@@ -210,15 +218,15 @@ def triage_arch(backend, project: Path, args) -> dict:
             payload = IMPROVE_CODE.format(arch=arch_md, code=code)
         else:
             payload = IMPROVE.format(arch=arch_md)      # prose-only (arch mode, or no source found)
-        fb = S.repeat_probe(backend, S.FABLE_MODEL, payload, getattr(args, "fable_effort", "low"),
+        fb = B.repeat_probe(backend, M.PROBE_MODEL.id, payload, getattr(args, "fable_effort", "low"),
                             rep, text=True)
 
-        controls: dict[str, S.ProbeResult] = {}
+        controls: dict[str, B.ProbeResult] = {}
         if not args.no_controls and fb.tripped:
-            for model, effort in S.CONTROL_MODELS:
+            for model, effort in M.control_pairs():
                 short = "opus" if "opus" in model else "sonnet"
-                controls[short] = S.repeat_probe(backend, model, payload, effort, rep, text=True)
-        calibration = S.calibrate(controls) if controls else ("n/a" if not fb.tripped else "control_error")
+                controls[short] = B.repeat_probe(backend, model, payload, effort, rep, text=True)
+        calibration = calibrate(controls) if controls else ("n/a" if not fb.tripped else "control_error")
         cv = _component_verdict(fb, calibration)
         comps.append({"name": name, "verdict": cv, "trip_fraction": fb.trip_fraction,
                       "calibration": calibration, "category": fb.category, "error": fb.error,
@@ -262,7 +270,7 @@ def _rollup(project: Path, comps: list[dict], backend, args, mode="arch") -> dic
         recommendation = (f"Fable balks on: {parts}. Use Opus for those components; the rest is "
                           f"fine on Fable.")
     else:
-        recommendation = S.RECOMMENDATIONS.get(project_verdict, "")
+        recommendation = RECOMMENDATIONS.get(project_verdict, "")
 
     # optional Opus adjudication on the first ambiguous component
     adj = None

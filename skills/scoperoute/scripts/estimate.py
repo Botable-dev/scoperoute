@@ -165,40 +165,43 @@ def estimate_project(project: Path, repeat: int = 1, mode: str = "code") -> Esti
     proj_tok = toks(proj_bytes)
 
     stages: list[StageCost] = []
-
-    # Stage 1 — recon (Sonnet 5, low): reads source (no char-truncation), but is
-    # bounded — it samples a representative slice then summarizes, so a giant repo
-    # doesn't mean a giant bill.
-    recon_in = min(int(proj_tok * RECON_OVERHEAD), RECON_INPUT_CAP)
+    # The stage SET comes from the one declarative stage-graph (models.STAGES, arch-review
+    # TP3); only the per-stage token heuristics live here. A stage added to the pipeline
+    # shows up in the estimate automatically — or a test fails.
+    declared = M.stages_for(mode)
     recon_out = RECON_OUT_BASE + RECON_OUT_PER_COMPONENT * n
-    stages.append(StageCost("recon", M.RECON_MODEL.id, recon_in, recon_out, 1,
-                            _cost(M.RECON_MODEL.id, recon_in, recon_out), "always"))
+    payload_in = ARCH_TOKENS + (CODE_EXCERPT_TOKENS if mode == "code" else 0)
 
-    # Stage 2 — summary (Opus): recon notes -> per-component arch.md (one call).
-    sum_in, sum_out = recon_out + 500, SUMMARY_OUT_PER_COMPONENT * n
-    stages.append(StageCost("summary", M.SUMMARY_MODEL.id, sum_in, sum_out, 1,
-                            _cost(M.SUMMARY_MODEL.id, sum_in, sum_out), "always"))
-
-    # Stage 2b — curate (Opus, --probe code only): reads real source (bounded) and
-    # returns the high-signal code excerpt per component that gets added to the probe.
-    payload_in = ARCH_TOKENS
-    if mode == "code":
-        curate_in = min(proj_tok, CURATE_INPUT_CAP)
-        curate_out = CODE_EXCERPT_TOKENS * n
-        stages.append(StageCost("curate", M.SUMMARY_MODEL.id, curate_in, curate_out, 1,
-                                _cost(M.SUMMARY_MODEL.id, curate_in, curate_out), "always"))
-        payload_in = ARCH_TOKENS + CODE_EXCERPT_TOKENS      # Fable sees arch + real code
-
-    # Stage 3 — probe (Fable): each component, repeated N times.
-    probe_calls = n * repeat
-    stages.append(StageCost("probe", M.PROBE_MODEL.id,
-                            payload_in * probe_calls, PROBE_OUT * probe_calls, probe_calls,
-                            _cost(M.PROBE_MODEL.id, payload_in, PROBE_OUT, probe_calls), "always"))
-
-    # Stage 4 — controls (Opus + Sonnet), only on components that trip (max = all n).
-    for mdl, _eff in M.CONTROLS:
-        stages.append(StageCost("controls", mdl.id, payload_in * n, PROBE_OUT * n, n,
-                                _cost(mdl.id, payload_in, PROBE_OUT, n), "if_tripped"))
+    for st in declared:
+        if st.name == "recon":
+            # Reads source (no char-truncation) but bounded — samples a representative
+            # slice then summarizes, so a giant repo doesn't mean a giant bill.
+            recon_in = min(int(proj_tok * RECON_OVERHEAD), RECON_INPUT_CAP)
+            stages.append(StageCost("recon", st.model.id, recon_in, recon_out, 1,
+                                    _cost(st.model.id, recon_in, recon_out), st.when))
+        elif st.name == "summary":
+            # recon notes -> per-component arch.md (one call)
+            sum_in, sum_out = recon_out + 500, SUMMARY_OUT_PER_COMPONENT * n
+            stages.append(StageCost("summary", st.model.id, sum_in, sum_out, 1,
+                                    _cost(st.model.id, sum_in, sum_out), st.when))
+        elif st.name == "curate":
+            # reads real source (bounded), returns the high-signal excerpt per component
+            curate_in = min(proj_tok, CURATE_INPUT_CAP)
+            curate_out = CODE_EXCERPT_TOKENS * n
+            stages.append(StageCost("curate", st.model.id, curate_in, curate_out, 1,
+                                    _cost(st.model.id, curate_in, curate_out), st.when))
+        elif st.name == "probe":
+            probe_calls = n * repeat
+            stages.append(StageCost("probe", st.model.id,
+                                    payload_in * probe_calls, PROBE_OUT * probe_calls, probe_calls,
+                                    _cost(st.model.id, payload_in, PROBE_OUT, probe_calls), st.when))
+        elif st.name == "controls":
+            # Opus + Sonnet, only on components that trip (max = all n)
+            for mdl, _eff in M.CONTROLS:
+                stages.append(StageCost("controls", mdl.id, payload_in * n, PROBE_OUT * n, n,
+                                        _cost(mdl.id, payload_in, PROBE_OUT, n), st.when))
+        else:                       # a stage was declared that this estimator can't price
+            raise ValueError(f"no cost heuristic for declared stage {st.name!r}")
 
     usd_min = round(sum(s.usd for s in stages if s.when == "always"), 3)
     usd_max = round(sum(s.usd for s in stages), 3)
@@ -255,7 +258,7 @@ def print_report(ests: list[Estimate], repeat: int) -> None:
             if s.when == "always":
                 m["usd_min"] += s.usd
     print("\nBy stage (tokens / $ per part):")
-    for stage in ("recon", "summary", "curate", "probe", "controls"):
+    for stage in (s.name for s in M.STAGES):        # print in declared pipeline order
         if stage in stage_agg:
             a = stage_agg[stage]
             tag = "" if a["when"] == "always" else "   ← only components that trip"
